@@ -1,0 +1,883 @@
+---
+title: "Design Search Codes Analysis"
+output: html_document
+---
+
+Plot number of trademark applications/registrations per year from 1986-2023.
+
+```{r load_data}
+library(data.table)
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+library(tikzDevice)
+options(tz = 'America/New_York')
+
+case_file <- fread('/Volumes/EXTERNALHD1/csv/case_file.csv')
+design_search <- fread('/Volumes/EXTERNALHD1/csv/design_search.csv')
+classification <- fread('/Volumes/EXTERNALHD1/csv/classification.csv')
+intl_class <- fread('/Volumes/EXTERNALHD1/csv/intl_class.csv')
+#owner <- fread('/Volumes/EXTERNALHD1/csv/owner.csv')
+attorney <- fread('/Volumes/EXTERNALHD1/csv/correspondent_domrep_attorney.csv')
+
+```
+
+```{r all_totals}
+
+# plot data
+
+case_file_filtered <- case_file |>
+  filter((filing_dt >= '1986-01-01'), (filing_dt < '2024-01-01')) |> # removes all rows where filing_dt is NA
+  mutate(year = year(filing_dt))
+
+case_file_filtered_totals <- case_file_filtered |>
+  #filter(grepl('^1+|^3+|^4+|^5+', mark_draw_cd)) |>
+  group_by(year) |>
+  mutate(app_total = n()) |>
+  ungroup() |>
+  filter(!(is.na(registration_dt) | grepl('^0+', registration_no))) |>
+  group_by(year) |>
+  mutate(reg_total = n()) |>
+  select(year, app_total, reg_total) |>
+  filter(!duplicated(year))
+
+case_file_filtered_percentages <- case_file_filtered_totals |>
+  mutate(percentage = reg_total/app_total)
+  
+molten_filtered_totals <- melt(case_file_filtered_totals, id = 'year')
+molten_filtered_totals$variable <- factor(molten_filtered_totals$variable, levels = rev(levels(molten_filtered_totals$variable)))
+
+```
+
+```{r plot_all_totals}
+
+theme_set(theme_classic())
+
+tikz(file = './graphics/figure_1.tex', width = 4.5, height = 3.5)
+
+figure_1 <- ggplot(molten_filtered_totals, aes(year, value, fill = variable)) +
+  geom_col(position = 'dodge') +
+  labs(x = 'Year', y = 'Number') +
+  scale_fill_manual(name = '', labels = c('Registrations', 'Applications'), values = c('#099999', '#203769')) +
+  scale_x_continuous(breaks = seq(1985, 2025, by = 5), limits = c(1986, 2023), expand = c(0, 0)) +
+  scale_y_continuous(breaks = seq(0, 700000, by = 100000), expand = c(0, 0), labels = scales::label_comma()) +
+  theme(axis.title.x = element_text(vjust = -2, size = 10),
+        axis.title.y = element_text(vjust = 3, size = 10),
+        axis.text.x = element_text(size = 6),
+        axis.text.y = element_text(size = 6))
+
+figure_1
+  
+dev.off()
+```
+
+Plot number of nonword trademark applications/registrations per year from 1986-2023.
+
+```{r nonword_totals}
+
+case_file_nonword_filtered <- case_file_filtered |>
+  filter(grepl('^2+', mark_draw_cd))
+
+case_file_filtered_nonword_totals <- case_file_nonword_filtered |>
+  #filter(supp_reg_in == 0) |>
+  group_by(year) |>
+  mutate(app_total_nonword = n()) |>
+  ungroup() |>
+  filter(!(is.na(registration_dt) | grepl('^0+', registration_no))) |>
+  group_by(year) |>
+  mutate(reg_total_nonword = n()) |>
+  select(year, app_total_nonword, reg_total_nonword) |>
+  filter(!duplicated(year))
+
+case_file_filtered_nonword_percentages <- case_file_filtered_nonword_totals |>
+  mutate(percentage = reg_total_nonword/app_total_nonword)
+  
+molten_filtered_nonword_totals <- melt(case_file_filtered_nonword_totals, id = 'year')
+molten_filtered_nonword_totals$variable <- factor(molten_filtered_nonword_totals$variable, levels = rev(levels(molten_filtered_nonword_totals$variable)))
+
+merged_app_totals <- full_join(case_file_filtered_totals, case_file_filtered_nonword_totals, by = 'year') |>
+  select(year, app_total, app_total_nonword) |>
+  mutate(percentage = app_total_nonword/app_total)
+
+```
+```{r plot_nonword_totals}
+
+library(patchwork)
+
+tikz(file = './graphics/figure_2.tex', width = 4.5, height = 4)
+
+figure_2 <- ggplot(molten_filtered_nonword_totals, aes(year, value, fill = variable)) +
+  geom_col(position = 'dodge') +
+  labs(x = 'Year', y = 'Number') +
+  scale_fill_manual(name = '', labels = c('Registrations', 'Applications'), values = c('#099999', '#203769')) +
+  scale_x_continuous(breaks = seq(1985, 2025, by = 5), limits = c(1986, 2023), expand = c(0, 0)) +
+  scale_y_continuous(breaks = seq(0, 18000, by = 1000), expand = c(0, 0), labels = scales::label_comma()) +
+  theme(axis.title.x = element_text(vjust = -2, size = 10),
+        axis.title.y = element_text(vjust = 3, size = 10),
+        axis.text.x = element_text(size = 6),
+        axis.text.y = element_text(size = 6))
+
+figure_2
+  
+dev.off()
+
+```
+`
+
+```{r plot_nonword_percentage}
+
+tikz(file = './graphics/figure_3.tex', width = 4, height = 3)
+
+figure_3 <- ggplot(merged_app_totals, aes(year, percentage)) +
+  geom_line(linewidth = 1.5) +
+  labs(x = 'Year', y = 'Nonword Applications \n / Total Applications') +
+  scale_x_continuous(breaks = seq(1985, 2025, by = 5), limits = c(1986, 2023), expand = c(0, 0)) +
+  scale_y_continuous(breaks = seq(0.02, 0.05, by = 0.01), limits = c(0.02, 0.05), expand = c(0, 0)) +
+  theme(axis.title.x = element_text(vjust = -2, size = 10),
+        axis.title.y = element_text(vjust = 3, size = 10),
+        axis.text.x = element_text(size = 6),
+        axis.text.y = element_text(size = 6))
+
+figure_3
+
+dev.off()
+
+```
+
+Compute aggregate stats for nonword marks:
+
+```{r code_merge}
+
+# merge design_search data with case_file data
+
+df <- right_join(case_file, design_search, by = 'serial_no') |>
+  select(serial_no, filing_dt, registration_no, registration_dt, publication_dt, mark_draw_cd, mark_id_char, design_search_cd, acq_dist_in, lb_use_file_in, supp_reg_in, serv_mark_in, trade_mark_in, cert_mark_in, coll_memb_mark_in, coll_serv_mark_in, coll_trade_mark_in, cert_mark_in, draw_color_cur_in, abandon_dt, reg_cancel_dt) |>
+  filter(filing_dt >= '1986-01-01', filing_dt < '2024-01-01') |>
+  filter(grepl('^2+', mark_draw_cd)) |>
+  mutate(year = year(filing_dt))
+  
+
+```
+
+```{r code_aggregate_stats}
+
+df_no_codes <- df |>
+  group_by(serial_no) |>
+  summarise(n = n())
+
+mean(df_no_codes$n)
+median(df_no_codes$n)
+
+```
+
+```{r code_density_distribution}
+
+tikz(file = './graphics/figure_4.tex', width = 6.5, height = 4)
+
+figure_4.1 <- ggplot(df_no_codes, aes(n)) +
+  geom_histogram(binwidth = 1, aes(y = ..density..), fill = "#099999") +
+  labs(x = 'Number of Design Search Codes', y = 'Density') +
+  #stat_function(fun = dnorm, colour = "#203769", linewidth = 3.25, args = list(mean = mean(df_no_codes$n), sd = sd(df_no_codes$n))) +
+  scale_x_continuous(breaks = seq(0, 70, by = 5), limits = c(0, 70), expand = c(0, 0)) +
+  scale_y_continuous(breaks = seq(0.00, 0.25, by = 0.05), expand = c(0, 0)) +
+  theme(axis.title.x = element_text(vjust = -1.25, size = 10),
+        axis.title.y = element_text(vjust = 3, size = 10),
+        axis.text.x = element_text(size = 6),
+        axis.text.y = element_text(size = 6))
+
+figure_4.1
+
+dev.off()
+
+```
+
+```{r code_per_year_stats}
+
+df_no_codes_per_year <- df |>
+  group_by(serial_no) |>
+  mutate(n = n()) |>
+  ungroup() |>
+  group_by(year) |>
+  summarise(mean = mean(n), median = median(n))
+
+```
+
+```{r plot_design_search_code_per_year_stats}
+
+tikz(file = './graphics/figure_5.tex', width = 5.5, height = 3.5)
+
+figure_5.1 <- ggplot(df_no_codes_per_year, aes(year, mean)) +
+  geom_line(linewidth = 1.5) +
+  labs(x = 'Year', y = 'Mean Number of Codes') +
+  scale_x_continuous(breaks = seq(1985, 2025, by = 5), limits = c(1986, 2024), expand = c(0, 0)) +
+  scale_y_continuous(breaks = seq(3, 6, by = 0.5), limits = c(3, 6), expand = c(0, 0)) +
+  theme(axis.title.x = element_text(vjust = -3, size = 10),
+        axis.title.y = element_text(vjust = 3, size = 10),
+        axis.text.x = element_text(vjust = 0.3, angle = 45, size = 6),
+        axis.text.y = element_text(size = 6))
+
+figure_5.2 <- ggplot(df_no_codes_per_year, aes(year, median)) +
+  geom_col() +
+  labs(x = 'Year', y = 'Median Number of Codes') +
+  scale_x_continuous(breaks = seq(1985, 2025, by = 5), limits = c(1986, 2024), expand = c(0, 0)) +
+  scale_y_continuous(breaks = seq(0, 6, by = 0.5), limits = c(0, 6), expand = c(0, 0)) +
+  theme(axis.title.x = element_text(vjust = -3, size = 10),
+        axis.title.y = element_text(vjust = 3, size = 10),
+        axis.text.x = element_text(vjust = 0.3, angle = 45, size = 6),
+        axis.text.y = element_text(size = 6))
+
+figure_5.1 + figure_5.2
+  
+dev.off()
+
+```
+
+```{r super_calculations}
+
+df_1 <- df |>
+  #filter(supp_reg_in == '0') |>
+  #filter(filing_dt > '2007-01-07')
+  mutate(writing = case_when(grepl('^27+|^28+|^2901+', design_search_cd) == TRUE ~ 1, TRUE ~ 0)) |>
+  group_by(serial_no) |>
+  filter(max(writing) != '1') |>
+  mutate(n = n()) |>
+  ungroup() |>
+  filter(!duplicated(serial_no)) |>
+  group_by(year)
+
+super3_totals_per_year <- df_1 |>
+  filter(n > 3) |>
+  summarise(super3 = n())
+
+super5_totals_per_year <- df_1 |>
+  filter(n > 5) |>
+  summarise(super5 = n())
+
+super10_totals_per_year <- df_1 |>
+  filter(n > 10) |>
+  summarise(super10 = n())
+
+super15_totals_per_year <- df_1 |>
+  filter(n > 15) |>
+  summarise(super15 = n())
+
+super_totals_per_year <- super3_totals_per_year |>
+  full_join(super5_totals_per_year) |>
+  full_join(super10_totals_per_year) |>
+  full_join(super15_totals_per_year)
+
+```
+
+```{r super_plots}
+
+tikz(file = './graphics/figure_6.tex', width = 5.75, height = 3.5)
+
+#figure_6.1 <- ggplot(super_totals_per_year, aes(year, super3)) +
+ #geom_col() +
+  #labs(x = 'Year', y = 'Number of Applications with $>$ 3 Codes') +
+  #scale_x_continuous(breaks = seq(1985, 2023, by = 10), expand = c(0, 0)) +
+  #scale_y_continuous(breaks = seq(0, 9000, by = 1000), expand = c(0, 0)) +
+  #theme_classic()
+
+figure_6.2 <- ggplot(super_totals_per_year, aes(year, super5)) +
+  geom_col() +
+  labs(x = 'Year', y = 'Number of Applications with $>$ 5 Codes') +
+  scale_x_continuous(breaks = seq(1985, 2023, by = 5), expand = c(0, 0)) +
+  scale_y_continuous(breaks = seq(0, 3500, by = 500), expand = c(0, 0)) +
+  theme(axis.title.x = element_text(vjust = -3, size = 7),
+        axis.title.y = element_text(vjust = 3, size = 7),
+        axis.text.x = element_text(vjust = 0.3, angle = 45, size = 6),
+        axis.text.y = element_text(size = 6))
+
+figure_6.3 <- ggplot(super_totals_per_year, aes(year, super10)) +
+  geom_col() +
+  labs(x = 'Year', y = 'Number of Applications with $>$ 10 Codes') +
+  scale_x_continuous(breaks = seq(1985, 2023, by = 5), expand = c(0, 0)) +
+  scale_y_continuous(breaks = seq(0, 300, by = 50), expand = c(0, 0)) +
+  theme(axis.title.x = element_text(vjust = -3, size = 7),
+        axis.title.y = element_text(vjust = 3, size = 7),
+        axis.text.x = element_text(vjust = 0.3, angle = 45, size = 6),
+        axis.text.y = element_text(size = 6))
+  
+figure_6.4 <- ggplot(super_totals_per_year, aes(year, super15)) +
+  geom_col() +
+  labs(x = 'Year', y = 'Number of Applications with $>$ 15 Codes') +
+  scale_x_continuous(breaks = seq(1985, 2023, by = 5), expand = c(0, 0)) +
+  scale_y_continuous(breaks = seq(0, 60, by = 5), expand = c(0, 0)) +
+  theme(axis.title.x = element_text(vjust = -3, size = 7),
+        axis.title.y = element_text(vjust = 3, size = 7),
+        axis.text.x = element_text(vjust = 0.3, angle = 45, size = 6),
+        axis.text.y = element_text(size = 6))
+
+figure_6.2 + figure_6.3 + figure_6.4
+
+dev.off()
+
+```
+
+Get outliers as a percentage of applications per year:
+
+```{r super_percentage}
+
+super_percentages_per_year <- super_totals_per_year |>
+  full_join(case_file_filtered_totals) |>
+  full_join(case_file_filtered_nonword_totals) |>
+  mutate(percentage5 = super5/app_total) |>
+  mutate(percentage10 = super10/app_total) |>
+  mutate(percentage15 = super15/app_total) |>
+  mutate(percentage_nonword = app_total_nonword/app_total)
+
+super_percentages_per_year[is.na(super_percentages_per_year)] <- 0
+
+```
+
+```{r super_percentage_plot}
+
+tikz(file = './graphics/figure_7.tex', width = 5.75, height = 3.5)
+
+figure_7.0 <- ggplot(super_percentages_per_year, aes(year, percentage5)) +
+  geom_point() +
+  geom_smooth() +
+  labs(x = 'Year', y = 'Nonword Applications with $>$ 5 Codes\n / All Applications') +
+  scale_x_continuous(breaks = seq(1985, 2023, by = 5), expand = c(0, 0)) +
+  scale_y_continuous(breaks = seq(0.001, 0.005, by = 0.001), limits = c(0.001, 0.005), expand = c(0, 0)) +
+  theme(axis.title.x = element_text(vjust = -3, size = 7.5),
+        axis.title.y = element_text(vjust = 3, size = 7.5),
+        axis.text.x = element_text(vjust = 0.3, angle = 45, size = 6),
+        axis.text.y = element_text(size = 6))
+
+figure_7.1 <- ggplot(super_percentages_per_year, aes(year, percentage10)) +
+  geom_point() +
+  geom_smooth() +
+  labs(x = 'Year', y = 'Nonword Applications with $>$ 10 Codes\n / All Applications') +
+  scale_x_continuous(breaks = seq(1985, 2023, by = 5), expand = c(0, 0)) +
+  scale_y_continuous(labels = scales::label_number(), expand = c(0, 0)) +
+  theme(axis.title.x = element_text(vjust = -3, size = 7.5),
+        axis.title.y = element_text(vjust = 3, size = 7.5),
+        axis.text.x = element_text(vjust = 0.3, angle = 45, size = 6),
+        axis.text.y = element_text(size = 6))
+
+figure_7.2 <- ggplot(super_percentages_per_year, aes(year, percentage15)) +
+  geom_point() +
+  geom_smooth() +
+  labs(x = 'Year', y = 'Nonword Applications with $>$ 15 Codes\n / All Applications') +
+  scale_x_continuous(breaks = seq(1985, 2023, by = 5), expand = c(0, 0)) +
+  scale_y_continuous(labels = scales::label_number(), expand = c(0, 0)) +
+  theme(axis.title.x = element_text(vjust = -3, size = 7.5),
+        axis.title.y = element_text(vjust = 3, size = 7.5),
+        axis.text.x = element_text(vjust = 0.3, angle = 45, size = 6),
+        axis.text.y = element_text(size = 6))
+
+figure_7.0 + figure_7.1 + figure_7.2
+
+dev.off()
+
+```
+
+Switch to focus on number of different categories of design codes:
+
+```{r category_aggregate_stats}
+
+library(stringr)
+
+df_no_categories <- df |>
+  mutate(category = str_sub(design_search_cd, 0, -5)) |>
+  group_by(serial_no) |>
+  summarise(n = length(unique(category)))
+
+mean(df_no_categories$n)
+median(df_no_categories$n)
+
+#ggplot(df_no_categories, aes(n)) +
+  #geom_histogram(binwidth = 1, aes(y = ..density..)) +
+  #stat_function(fun = dnorm, colour = "red", args = list(mean = mean(df_no_categories$n), sd = sd(df_no_categories$n))) +
+  #theme_classic()
+
+```
+
+```{r category_per_year_stats}
+
+df_2 <- df |>
+  mutate(category = str_sub(design_search_cd, 0, -5)) |>
+  group_by(serial_no) |>
+  mutate(n = length(unique(category))) |>
+  ungroup()
+
+df_no_categories_per_year <- df_2 |>
+  group_by(year) |>
+  summarise(mean = mean(n), median = median(n))
+
+figure_I.1 <- ggplot(df_no_categories_per_year, aes(year, mean)) +
+  geom_point() +
+  geom_line() +
+  labs(x = 'Year', y = 'Mean Number of Categories') +
+  scale_x_continuous(breaks = seq(1985, 2024, by = 5), limits = c(1985, 2024), expand = c(0, 0)) +
+  scale_y_continuous(breaks = seq(0, 5), limits = c(0, 5), expand = c(0, 0)) +
+  theme_classic()
+
+figure_I.2 <- ggplot(df_no_categories_per_year, aes(year, median)) +
+  geom_point() +
+  geom_line() +
+  labs(x = 'Year', y = 'Median Number of Categories') +
+  scale_x_continuous(breaks = seq(1985, 2024, by = 5), limits = c(1985, 2024), expand = c(0, 0)) +
+  scale_y_continuous(breaks = seq(0, 5), limits = c(0, 5), expand = c(0, 0)) +
+  theme_classic()
+
+figure_I.1 + figure_I.2
+
+```
+
+```{r supercat_calculations}
+
+df_3 <- df_2 |>
+  filter(!duplicated(serial_no)) |>
+  group_by(year)
+
+super3cat_totals_per_year <- df_3 |>
+  filter(n > 3) |>
+  summarise(super3 = n())
+
+super5cat_totals_per_year <- df_3 |>
+  filter(n > 5) |>
+  summarise(super5 = n())
+
+super7cat_totals_per_year <- df_3 |>
+  filter(n > 7) |>
+  summarise(super7 = n())
+
+supercat_totals_per_year <- super3cat_totals_per_year |>
+  full_join(super5cat_totals_per_year, by = 'year') |>
+  full_join(super7cat_totals_per_year, by = 'year')
+
+```
+
+```{r supercat_percentage}
+
+figure_8.1 <- ggplot(supercat_totals_per_year, aes(year, super3)) +
+  geom_col() +
+  labs(x = 'Year', y = 'Number of Applications with > 3 Categories') +
+  scale_x_continuous(breaks = seq(1985, 2023, by = 10), expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0))
+
+supercat_percentages_per_year <- supercat_totals_per_year |>
+  full_join(case_file_filtered_totals, by = 'year') |>
+  full_join(case_file_filtered_nonword_totals, by = 'year') |>
+  mutate(percentage3 = super3/app_total) |>
+  mutate(percentage5 = super5/app_total) |>
+  mutate(percentage7 = super7/app_total)
+
+figure_8.2 <- ggplot(supercat_percentages_per_year, aes(year, percentage3)) +
+  geom_point() +
+  labs(x = 'Year', y = 'Nonword Applications with > 3 Categories\n / All Applications') +
+  geom_smooth()
+
+figure_8.1 + figure_8.2
+
+```
+
+```{r nonbasic_stats}
+
+basic <- c('01.01.01', '01.01.02', '01.01.03', '01.01.04', '01.01.05', '01.01.06', '01.01.07', '01.01.09', '01.01.10', '01.01.11', '01.01.12', '01.01.13', '01.01.14', '01.03.03', '01.03.04', '01.05.01', '01.05.04', '01.05.25', '01.07.02', '01.07.04', '01.07.07', '01.07.08', '01.07.25', '01.09.01', '01.09.03', '01.09.05', '01.09.25', '01.11.01', '01.11.02', '01.11.25', '01.15.01', '01.15.02', '01.15.03', '01.15.04', '01.15.05', '01.15.06', '01.15.07', '01.15.08', '01.15.09', '01.15.10', '01.15.11', '01.15.12', '01.15.13', '01.15.15', '01.15.17', '01.15.18', '01.15.24', '01.15.25', '25.01.01', '25.01.25', '25.03.01', '25.03.02', '25.03.03', '25.03.04', '25.03.05', '25.03.25', '26.01.01', '26.01.02', '26.01.03', '26.01.04', '26.01.05', '26.01.06', '26.01.07', '26.01.08', '26.01.09', '26.01.11', '26.01.12', '26.01.13', '26.01.15', '26.01.16', '26.01.17', '26.01.18', '26.01.20', '26.01.21', '26.01.26', '26.01.27', '26.01.28', '26.01.29', '26.01.30', '26.01.31', '26.03.01', '26.03.02', '26.03.03', '26.03.04', '26.03.05', '26.03.07', '26.03.08', '26.03.09', '26.03.11', '26.03.12', '26.03.13', '26.03.14', '26.03.16', '26.03.17', '26.03.21', '26.03.28', '26.05.01', '26.05.02', '26.05.03', '26.05.05', '26.05.07', '26.05.08', '26.05.09', '26.05.12', '26.05.13', '26.05.14', '26.05.15', '26.05.16', '26.05.20', '26.05.21', '26.05.25', '26.05.28', '26.07.01', '26.07.02', '26.07.03', '26.07.12', '26.07.13', '26.07.14', '26.07.15', '26.07.21', '26.07.28', '26.09.01', '26.09.02', '26.09.03', '26.09.05', '26.09.07', '26.09.08', '26.09.09', '26.09.12', '26.09.13', '26.09.14', '26.09.16', '26.09.20', '26.09.21', '26.09.25', '26.09.28', '26.11.01', '26.11.02', '26.11.03', '26.11.05', '26.11.07', '26.11.08', '26.11.09', '26.11.10', '26.11.11', '26.11.12', '26.11.13', '26.11.14', '26.11.16', '26.11.20', '26.11.21', '26.11.25', '26.11.26', '26.11.27', '26.11.28', '26.13.01', '26.13.02', '26.13.03', '26.13.07', '26.13.08', '26.13.09', '26.13.12', '26.13.13', '26.13.14', '26.13.16', '26.13.21', '26.13.25', '26.13.28', '26.15.01', '26.15.02', '26.15.03', '26.15.07', '26.15.08', '26.15.09', '26.15.12', '26.15.13', '26.15.16', '26.15.20', '26.15.21', '26.15.25', '26.15.27', '26.15.28', '26.17.01', '26.17.02', '26.17.03', '26.17.04', '26.17.05', '26.17.06', '26.17.07', '26.17.08', '26.17.09', '26.17.10', '26.17.12', '26.17.25', '26.19.01', '26.19.02', '26.19.03', '26.19.04', '26.19.05', '26.19.25')
+
+basic_stripped <- as.data.frame(as.numeric(gsub('[[:punct:]]', '', basic))) |>
+  rename('design_search_cd' = 'as.numeric(gsub(\"[[:punct:]]\", \"\", basic))')
+
+df_basic <- df |>
+  semi_join(basic_stripped, by = 'design_search_cd') |>
+  mutate(n = 0) |>
+  ungroup()
+
+df_4 <- df |>
+  anti_join(basic_stripped, by = 'design_search_cd') |>
+  group_by(serial_no) |>
+  mutate(n = n()) |>
+  ungroup() |>
+  rbind(df_basic) |>
+  group_by(serial_no) |>
+  mutate(no_nonbasic = max(unique(n))) |>
+  filter(!duplicated(serial_no)) |>
+  ungroup()
+
+mean(df_4$no_nonbasic)
+median(df_4$no_nonbasic)
+
+```
+
+```{r nonbasic_stats_per_year}
+
+df_5 <- df |> # applications with at least one non-basic code
+  #filter(supp_reg_in == '0')
+  anti_join(basic_stripped, by = 'design_search_cd') |>
+  filter(!duplicated(serial_no)) |>
+  group_by(year) |>
+  summarise(n = n()) |>
+  full_join(case_file_filtered_totals, by = 'year') |>
+  full_join(case_file_filtered_nonword_totals, by = 'year') |>
+  mutate(percentage = n/app_total)
+
+figure_IV.1 <- ggplot(df_5, aes(year, n)) +
+  geom_col() +
+  labs(x = 'Year', y = 'Number of Applications with Non-Basic Codes') +
+  scale_x_continuous(breaks = seq(1985, 2024, by = 5), limits = c(1985, 2024), expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  theme_classic()
+
+figure_IV.2 <- ggplot(df_5, aes(year, percentage)) +
+  geom_col() +
+  labs(x = 'Year', y = 'Number of Applications with Non-Basic Codes / Total Applications') +
+  scale_x_continuous(breaks = seq(1985, 2024, by = 5), limits = c(1985, 2024), expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  theme_classic()
+
+figure_IV.1 + figure_IV.2
+
+```
+
+```{r nonbasic_alternative_calculations_I}
+
+# counts how many _NONBASIC_
+
+df_6 <- df |>
+  anti_join(basic_stripped, by = 'design_search_cd') |>
+  group_by(serial_no) |>
+  mutate(n = n()) |>
+  ungroup() |>
+  rbind(df_basic) |>
+  group_by(serial_no) |>
+  mutate(no_nonbasic = max(unique(n))) |>
+  filter(!duplicated(serial_no)) |>
+  ungroup() |>
+  group_by(year)
+
+super3nonbasic_totals_per_year <- df_6 |>
+  filter(no_nonbasic > 3) |>
+  summarise(super3 = n())
+
+super5nonbasic_totals_per_year <- df_6 |>
+  filter(no_nonbasic > 5) |>
+  summarise(super5 = n())
+
+super10nonbasic_totals_per_year <- df_6 |>
+  filter(no_nonbasic > 10) |>
+  summarise(super10 = n())
+
+super15nonbasic_totals_per_year <- df_6 |>
+  filter(no_nonbasic > 15) |>
+  summarise(super15 = n())
+
+supernonbasic_totals_per_year <- super3nonbasic_totals_per_year |>
+  full_join(super5nonbasic_totals_per_year, by = 'year') |>
+  full_join(super10nonbasic_totals_per_year, by = 'year') |>
+  full_join(super15nonbasic_totals_per_year, by = 'year') |>
+  full_join(case_file_filtered_totals, by = 'year') |>
+  full_join(case_file_filtered_nonword_totals, by = 'year') |>
+  mutate(percentage3 = super3/app_total) |>
+  mutate(percentage5 = super5/app_total) |>
+  mutate(percentage10 = super10/app_total) |>
+  mutate(percentage15 = super15/app_total)
+
+```
+
+```{r nonbasic_alternative_calculations_II}
+
+# counts how many _BASIC_ codes
+
+df_basic_counted <- df |>
+  semi_join(basic_stripped, by = 'design_search_cd') |>
+  group_by(serial_no) |>
+  mutate(n = n()) |>
+  ungroup()
+
+df_7 <- df |>
+  anti_join(basic_stripped, by = 'design_search_cd') |>
+  mutate(n = 0) |>
+  rbind(df_basic_counted) |>
+  group_by(serial_no) |>
+  mutate(no_basic = max(unique(n))) |>
+  filter(!duplicated(serial_no)) |>
+  ungroup() |>
+  group_by(year)
+
+super3basic_totals_per_year <- df_7 |>
+  filter(no_basic > 3) |>
+  summarise(super3 = n())
+
+super5basic_totals_per_year <- df_7 |>
+  filter(no_basic > 5) |>
+  summarise(super5 = n())
+
+super10basic_totals_per_year <- df_7 |>
+  filter(no_basic > 10) |>
+  summarise(super10 = n())
+
+super15basic_totals_per_year <- df_7 |>
+  filter(no_basic > 15) |>
+  summarise(super15 = n())
+
+superbasic_totals_per_year <- super3basic_totals_per_year |>
+  full_join(super5basic_totals_per_year, by = 'year') |>
+  full_join(super10basic_totals_per_year, by = 'year') |>
+  full_join(super15basic_totals_per_year, by = 'year') |>
+  full_join(case_file_filtered_totals, by = 'year') |>
+  full_join(case_file_filtered_nonword_totals, by = 'year') |>
+  mutate(percentage3 = super3/app_total) |>
+  mutate(percentage5 = super5/app_total) |>
+  mutate(percentage10 = super10/app_total) |>
+  mutate(percentage15 = super15/app_total)
+
+figure_V.1 <- ggplot(superbasic_totals_per_year, aes(year, percentage3)) +
+  geom_point() +
+  labs(x = 'Year', y = 'Nonword Applications with > 3 Basic Codes \n / All Applications') +
+  geom_smooth()
+
+figure_V.2 <- ggplot(superbasic_totals_per_year, aes(year, percentage5)) +
+  geom_point() +
+  labs(x = 'Year', y = 'Nonword Applications with > 5 Basic Codes \n / All Applications') +
+  geom_smooth()
+
+figure_V.3 <- ggplot(superbasic_totals_per_year, aes(year, percentage10)) +
+  geom_point() +
+  labs(x = 'Year', y = 'Nonword Applications with > 10 Basic Codes \n / All Applications') +
+  geom_smooth()
+
+figure_V.1 + figure_V.2 + figure_V.3
+
+```
+
+```{r mult_aggregate_stats}
+
+mult <- c('01.01.09', '01.01.10', '01.01.12', '01.01.13', '01.01.14', '01.03.03',  '01.15.18', '03.19.15', '05.01.10', '05.03.08', '06.03.03', '14.11.05', '22.03.02', '24.01.05', '24.09.09', '24.15.10', '26.01.13', '26.01.15', '26.01.17', '26.01.18', '26.01.30', '26.01.31', '26.03.13', '26.03.14', '26.05.13', '26.05.15', '26.05.20', '26.07.13', '26.07.14', '26.07.15', '26.09.13', '26.09.14', '26.09.20', '26.11.13', '26.11.14', '26.11.16', '26.11.20', '26.13.13', '26.13.14', '26.15.13', '26.15.20', '26.17.02', '29.05.01', '29.05.02', '29.05.03', '29.05.04', '29.05.05', '29.05.06', '29.05.07', '29.05.08', '29.05.09', '29.05.10', '29.05.11', '29.06.01', '29.06.02', '29.06.03', '29.06.04', '29.06.05', '29.06.06', '29.06.07', '29.06.08', '29.06.09', '29.06.10', '29.06.11', '29.07.01', '29.07.02', '29.07.03', '29.07.04', '29.07.05', '29.07.06', '29.07.07', '29.07.08', '29.07.09', '29.07.10', '29.07.11')
+
+mult_stripped <- as.data.frame(as.numeric(gsub('[[:punct:]]', '', mult))) |>
+  rename('design_search_cd' = 'as.numeric(gsub(\"[[:punct:]]\", \"\", mult))')
+
+df_mult <- df |>
+  semi_join(mult_stripped, by = 'design_search_cd') |>
+  group_by(serial_no) |>
+  mutate(n = n()) |>
+  ungroup()
+
+df_8 <- df |>
+  anti_join(mult_stripped, by = 'design_search_cd') |>
+  mutate(n = 0) |>
+  rbind(df_mult) |>
+  group_by(serial_no) |>
+  mutate(no_mult = max(unique(n))) |>
+  filter(!duplicated(serial_no)) |>
+  filter(filing_dt > '2007-01-06') |>
+  ungroup()
+
+mean(df_8$no_mult)
+median(df_8$no_mult)
+
+df_8_per_year <- df_8 |>
+  group_by(year) |>
+  filter(no_mult >= 5) |>
+  summarise(n = n()) |>
+  full_join(filter(case_file_filtered_totals, year >= 2007), by = 'year') |>
+  mutate(percentage = n/app_total)
+
+#df_5_mean_per_year <- df_5 |>
+  #group_by(year) |>
+  #summarise(mean = mean(n))
+
+```
+
+```{r}
+
+ggplot(df_8_per_year, aes(year, percentage)) +
+  geom_point() +
+  geom_smooth()
+
+```
+
+```{r df_complex_basic_analysis}
+
+df_basic_counted.1 <- df_basic_counted |>
+  rename(no_basic_raw = n)
+
+df_no_complex_basic <- df |>
+  anti_join(basic_stripped, by = 'design_search_cd') |>
+  mutate(no_basic_raw = 0) |>
+  rbind(df_basic_counted.1) |>
+  group_by(serial_no) |>
+  mutate(no_codes = n()) |>
+  ungroup() |>
+  group_by(serial_no) |>
+  mutate(no_basic = max(unique(no_basic_raw))) |>
+  filter(!duplicated(serial_no)) |>
+  mutate(percentage = no_basic/no_codes) |>
+  ungroup()
+
+```
+
+```{r}
+
+df_no_complex_basic |>
+  group_by(year) |>
+  summarize(mean = mean(percentage)) |>
+  ggplot(aes(year, mean)) +
+  geom_point() +
+  geom_smooth()
+
+```
+
+```{r}
+test <- df_no_complex_basic |>
+  group_by(year) |>
+  filter(no_codes > 5) |>
+  filter(percentage > 0.5) |>
+  summarise(n = n()) |>
+  full_join(case_file_filtered_totals) |>
+  mutate(percentage_apps = n/app_total)
+  
+```
+
+```{r log_regression}
+
+library(tidyr)
+
+intl_classes <- unique(intl_class$intl_class_cd)
+
+regression_df <- df |>
+  group_by(serial_no) |>
+  mutate(n = n()) |>
+  ungroup() |>
+  filter(!duplicated(serial_no)) |>
+  left_join(attorney, by = 'serial_no') |>
+  left_join(intl_class, by = 'serial_no') |>
+  mutate(registered = case_when(is.na(registration_dt) == FALSE & grepl('^0+', registration_no) == FALSE ~ 1, TRUE ~ 0)) |>
+  mutate(published = case_when(is.na(publication_dt) == FALSE ~ 1, TRUE ~ 0)) |>
+  filter(!grepl('1985|2022|2023|2024', year)) |>
+  mutate(bin19861990 = case_when(grepl('1986|1987|1988|1989|1990', year) == TRUE ~ 1, TRUE ~ 0)) |>
+  mutate(bin19911995 = case_when(grepl('1991|1992|1993|1994|1995', year) == TRUE ~ 1, TRUE ~ 0)) |>
+  mutate(bin19962000 = case_when(grepl('1996|1997|1998|1999|2000', year) == TRUE ~ 1, TRUE ~ 0)) |>
+  mutate(bin20012005 = case_when(grepl('2001|2002|2003|2004|2005', year) == TRUE ~ 1, TRUE ~ 0)) |>
+  mutate(bin20062010 = case_when(grepl('2006|2007|2008|2009|2010', year) == TRUE ~ 1, TRUE ~ 0)) |>
+  mutate(bin20112015 = case_when(grepl('2011|2012|2013|2014|2015', year) == TRUE ~ 1, TRUE ~ 0)) |>
+  mutate(bin20162020 = case_when(grepl('2016|2017|2018|2019|2020', year) == TRUE ~ 1, TRUE ~ 0)) |>
+  mutate(bin2021 = 0) |>
+  mutate(intl_class_yes = 1) |>
+  mutate(attorney = case_when(is.na(attorney_name) == FALSE & grepl('^[0-9]+$|^$|^\\?', attorney_name) == FALSE ~ 1, TRUE ~ 0)) |>
+  pivot_wider(names_from = 'intl_class_cd', values_from = 'intl_class_yes', values_fill = 0) |>
+  group_by(serial_no) |>
+  summarise_at(c('n', 'registered', 'published', intl_classes, 'bin19861990', 'bin19911995', 'bin19962000', 'bin20012005', 'bin20062010', 'bin20112015', 'bin20162020', 'bin2021', 'attorney'), max) |>
+  ungroup()
+  
+mod1 <- glm(registered ~ n, family = binomial, data = regression_df)
+
+mod2 <- glm(registered ~ . - serial_no - published, family = binomial, data = regression_df)
+
+mod3 <- glm(published ~ n, family = binomial, data = regression_df)
+
+mod4 <- glm(published ~ . - serial_no - registered, family = binomial, data = regression_df)
+
+```
+
+```{r regression_tables}
+library(xtable)
+
+table_1 <- summary(mod4)
+
+print(xtable(head(table_1$coefficients, 2), type = "latex", caption = '{\\label{table:1} Logistic regression output (n = number of codes)}', digits = c(0, 4, 4, 4, 4)), file = "table_1.tex")
+
+table_2 <- summary(mod2)
+
+print(xtable(head(table_2$coefficients, 2), type = "latex", caption = '{\\label{table:1} Logistic regression output (n = number of codes)}', digits = c(0, 4, 4, 4, 4)), file = "table_2.tex")
+
+
+```
+
+```{r codes_vs_app_no_plot}
+
+tikz(file = './graphics/figure_8.tex', width = 6.25, height = 5)
+
+scale1 <- 10^-9
+
+figure_8.1 <- ggplot(super_percentages_per_year, aes(year, app_total)) +
+  geom_line(aes(color = 'Total Applications'), show.legend = FALSE) +
+  geom_line(aes(y = percentage10/scale1, color = 'Percentage of Applications with $>$ 15 Codes'), show.legend = FALSE) +
+  scale_y_continuous(sec.axis = sec_axis(~.*scale1, name = 'Nonword Applications with $>$ 10 Codes\n / All Applications'), labels = scales::label_comma()) +
+  scale_x_continuous(breaks = seq(1985, 2024, by = 5), limits = c(1985, 2024), expand = c(0, 0)) +
+  labs(y = 'Total Number of Applications Filed', x = 'Year') +
+  scale_color_manual(values = c('#099999', '#203769')) +
+  theme(axis.title.x = element_text(vjust = -3, size = 6),
+        axis.title.y = element_text(vjust = 3, size = 6),
+        axis.text.x = element_text(vjust = 0.3, angle = 45, size = 5),
+        axis.text.y = element_text(size = 5))
+
+scale2 <- 10^-10
+
+figure_8.2 <- ggplot(super_percentages_per_year, aes(year, app_total)) +
+  geom_line(aes(color = 'Total Applications'), show.legend = FALSE) +
+  geom_line(aes(y = percentage15/scale2, color = 'Percentage of Applications with $>$ 15 Codes'), show.legend = FALSE) +
+  scale_y_continuous(sec.axis = sec_axis(~.*scale2, name = 'Nonword Applications with $>$ 15 Codes\n / All Applications'), labels = scales::label_number()) +
+  scale_x_continuous(breaks = seq(1985, 2024, by = 5), limits = c(1985, 2024), expand = c(0, 0)) +
+  labs(y = 'Total Number of Applications Filed', x = 'Year') +
+  scale_color_manual(values = c('#099999', '#203769')) +
+  theme(axis.title.x = element_text(vjust = -3, size = 6),
+        axis.title.y = element_text(vjust = 3, size = 6),
+        axis.text.x = element_text(vjust = 0.3, angle = 45, size = 5),
+        axis.text.y = element_text(size = 5))
+
+figure_8.1 + figure_8.2
+
+dev.off()
+
+```
+
+```{r codes_vs_app_no_correlations}
+
+library(readxl)
+
+gdp <- read.csv('./gdp.csv', skip = 4)
+us_gdp <- gdp |>
+  select(Country.Code, X1985:X2023) |>
+  filter(Country.Code == 'USA') |>
+  pivot_longer(names_to = 'year', values_to = 'gdp', X1985:X2023) |>
+  mutate(year = as.double(str_sub(year, 2, 5)))
+
+sp500 <- read_excel('./histretSP.xls', sheet = 'sp500_raw') |>
+  select(1:2) |>
+  mutate(year = as.double(Year)) |>
+  select(-Year) |>
+  rename(sp500 = 'S&P 500') |>
+  filter(year > 1984)
+
+cor1 <- cor.test(formula = ~ app_total + percentage10, data = super_percentages_per_year)
+
+cor2 <- cor.test(formula = ~ app_total + percentage15, data = super_percentages_per_year)
+
+cor3 <- cor.test(formula = ~ app_total + percentage10lag, data = super_percentages_per_year |>
+                   mutate(percentage10lag = lag(percentage10, 1L)) |>
+                   filter(year > 1985))
+
+cor4 <- cor.test(formula = ~ app_total + percentage15lag, data = super_percentages_per_year |>
+                   mutate(percentage15lag = lag(percentage15, 1L)) |>
+                   filter(year > 1985))
+
+cor5 <- cor.test(formula = ~ app_total + reg_total, data = super_percentages_per_year)
+
+cor6 <- cor.test(formula = ~ gdp + app_total, data = right_join(super_percentages_per_year, us_gdp, by = 'year'))
+
+cor7 <- cor.test(formula = ~ sp500 + app_total, data = right_join(super_percentages_per_year, sp500, by = 'year'))
+
+```
+
+```{r df_all}
+
+df_all <- right_join(case_file, design_search, by = 'serial_no') |>
+  filter(grepl('^2+', mark_draw_cd)) |>
+  filter(!(is.na(registration_dt) | grepl('^0+', registration_no))) |>
+  group_by(serial_no) |>
+  mutate(n = n()) |>
+  filter(!duplicated(serial_no)) |>
+  select(serial_no, filing_dt, registration_dt, n)
+
+```
+
+```{r top_ten_ever_by_codes}
+
+top_50_ever <- head(df_all[order(df_all$n, decreasing = TRUE), ], 50)
+
+```
