@@ -826,44 +826,6 @@ dev.off()
 
 ```
 
-```{r codes_vs_app_no_correlations}
-
-library(readxl)
-
-gdp <- read.csv('./gdp.csv', skip = 4)
-us_gdp <- gdp |>
-  select(Country.Code, X1985:X2023) |>
-  filter(Country.Code == 'USA') |>
-  pivot_longer(names_to = 'year', values_to = 'gdp', X1985:X2023) |>
-  mutate(year = as.double(str_sub(year, 2, 5)))
-
-sp500 <- read_excel('./histretSP.xls', sheet = 'sp500_raw') |>
-  select(1:2) |>
-  mutate(year = as.double(Year)) |>
-  select(-Year) |>
-  rename(sp500 = 'S&P 500') |>
-  filter(year > 1984)
-
-cor1 <- cor.test(formula = ~ app_total + percentage10, data = super_percentages_per_year)
-
-cor2 <- cor.test(formula = ~ app_total + percentage15, data = super_percentages_per_year)
-
-cor3 <- cor.test(formula = ~ app_total + percentage10lag, data = super_percentages_per_year |>
-                   mutate(percentage10lag = lag(percentage10, 1L)) |>
-                   filter(year > 1985))
-
-cor4 <- cor.test(formula = ~ app_total + percentage15lag, data = super_percentages_per_year |>
-                   mutate(percentage15lag = lag(percentage15, 1L)) |>
-                   filter(year > 1985))
-
-cor5 <- cor.test(formula = ~ app_total + reg_total, data = super_percentages_per_year)
-
-cor6 <- cor.test(formula = ~ gdp + app_total, data = right_join(super_percentages_per_year, us_gdp, by = 'year'))
-
-cor7 <- cor.test(formula = ~ sp500 + app_total, data = right_join(super_percentages_per_year, sp500, by = 'year'))
-
-```
-
 ```{r df_all}
 
 df_all <- right_join(case_file, design_search, by = 'serial_no') |>
