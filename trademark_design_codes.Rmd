@@ -17,7 +17,7 @@ case_file <- fread('/Volumes/EXTERNALHD1/csv/case_file.csv')
 design_search <- fread('/Volumes/EXTERNALHD1/csv/design_search.csv')
 classification <- fread('/Volumes/EXTERNALHD1/csv/classification.csv')
 intl_class <- fread('/Volumes/EXTERNALHD1/csv/intl_class.csv')
-#owner <- fread('/Volumes/EXTERNALHD1/csv/owner.csv')
+owner <- fread('/Volumes/EXTERNALHD1/csv/owner.csv')
 attorney <- fread('/Volumes/EXTERNALHD1/csv/correspondent_domrep_attorney.csv')
 
 ```
@@ -100,6 +100,7 @@ merged_app_totals <- full_join(case_file_filtered_totals, case_file_filtered_non
   mutate(percentage = app_total_nonword/app_total)
 
 ```
+
 ```{r plot_nonword_totals}
 
 library(patchwork)
@@ -163,7 +164,9 @@ df <- right_join(case_file, design_search, by = 'serial_no') |>
 
 df_no_codes <- df |>
   group_by(serial_no) |>
-  summarise(n = n())
+  mutate(n = n()) |>
+  filter(!duplicated(serial_no)) |>
+  ungroup()
 
 mean(df_no_codes$n)
 median(df_no_codes$n)
@@ -733,22 +736,18 @@ test <- df_no_complex_basic |>
   
 ```
 
-```{r log_regression}
+```{r regression_df}
 
 library(tidyr)
 
 intl_classes <- unique(intl_class$intl_class_cd)
 
-regression_df <- df |>
-  group_by(serial_no) |>
-  mutate(n = n()) |>
-  ungroup() |>
-  filter(!duplicated(serial_no)) |>
+regression_df <- df_no_codes |>
   left_join(attorney, by = 'serial_no') |>
   left_join(intl_class, by = 'serial_no') |>
   mutate(registered = case_when(is.na(registration_dt) == FALSE & grepl('^0+', registration_no) == FALSE ~ 1, TRUE ~ 0)) |>
   mutate(published = case_when(is.na(publication_dt) == FALSE ~ 1, TRUE ~ 0)) |>
-  filter(!grepl('1985|2022|2023|2024', year)) |>
+  filter(!grepl('2022|2023|2024', year)) |>
   mutate(bin19861990 = case_when(grepl('1986|1987|1988|1989|1990', year) == TRUE ~ 1, TRUE ~ 0)) |>
   mutate(bin19911995 = case_when(grepl('1991|1992|1993|1994|1995', year) == TRUE ~ 1, TRUE ~ 0)) |>
   mutate(bin19962000 = case_when(grepl('1996|1997|1998|1999|2000', year) == TRUE ~ 1, TRUE ~ 0)) |>
@@ -763,6 +762,10 @@ regression_df <- df |>
   group_by(serial_no) |>
   summarise_at(c('n', 'registered', 'published', intl_classes, 'bin19861990', 'bin19911995', 'bin19962000', 'bin20012005', 'bin20062010', 'bin20112015', 'bin20162020', 'bin2021', 'attorney'), max) |>
   ungroup()
+
+```
+
+```{log_regression_models}
   
 mod1 <- glm(registered ~ n, family = binomial, data = regression_df)
 
@@ -796,7 +799,7 @@ scale1 <- 10^-9
 
 figure_8.1 <- ggplot(super_percentages_per_year, aes(year, app_total)) +
   geom_line(aes(color = 'Total Applications'), show.legend = FALSE) +
-  geom_line(aes(y = percentage10/scale1, color = 'Percentage of Applications with $>$ 15 Codes'), show.legend = FALSE) +
+  geom_line(aes(y = percentage10/scale1, color = 'Percentage of Applications with $>$ 10 Codes'), show.legend = FALSE) +
   scale_y_continuous(sec.axis = sec_axis(~.*scale1, name = 'Nonword Applications with $>$ 10 Codes\n / All Applications'), labels = scales::label_comma()) +
   scale_x_continuous(breaks = seq(1985, 2024, by = 5), limits = c(1985, 2024), expand = c(0, 0)) +
   labs(y = 'Total Number of Applications Filed', x = 'Year') +
@@ -841,5 +844,43 @@ df_all <- right_join(case_file, design_search, by = 'serial_no') |>
 ```{r top_ten_ever_by_codes}
 
 top_50_ever <- head(df_all[order(df_all$n, decreasing = TRUE), ], 50)
+
+```
+
+```{r alt_regression_df_2}
+
+library(tidyr)
+
+#intl_classes <- unique(intl_class$intl_class_cd)
+years <- unique(df_no_codes$year)
+
+alt_regression_df_2 <- df_no_codes |>
+  left_join(attorney, by = 'serial_no') |>
+  left_join(intl_class, by = 'serial_no') |>
+  mutate(year_yes = 1) |>
+  mutate(intl_class_yes = 1) |>
+  mutate(attorney = case_when(is.na(attorney_name) == FALSE & grepl('^[0-9]+$|^$|^\\?', attorney_name) == FALSE ~ 1, TRUE ~ 0)) |>
+  pivot_wider(names_from = 'intl_class_cd', values_from = 'intl_class_yes', values_fill = 0) |>
+  pivot_wider(names_from = 'year', values_from = 'year_yes', values_fill = 0) |>
+  group_by(serial_no) |>
+  summarise_at(c('n', intl_classes, years, 'attorney'), max) |>
+  mutate('1986' = 0) |>
+  ungroup()
+
+```
+
+```{r lm_to_control_for_time}
+
+mod5 <- lm(n ~ . - serial_no, data = alt_regression_df_2)
+
+```
+
+```{r regression_plots}
+
+setDT(as.data.frame(mod5[['coefficients']][50:87]), keep.rownames = TRUE) |>
+  rename('effect' = 'mod5[["coefficients"]][50:87]', 'year' = 'rn') |>
+  left_join(case_file_filtered_nonword_totals, by = 'year') |>
+  ggplot(aes(year, effect)) +
+  geom_point()
 
 ```
