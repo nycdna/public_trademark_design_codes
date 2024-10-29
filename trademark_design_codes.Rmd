@@ -14,11 +14,11 @@ library(tikzDevice)
 options(tz = 'America/New_York')
 
 case_file <- fread('/Volumes/EXTERNALHD1/csv/case_file.csv')
-design_search <- fread('/Volumes/EXTERNALHD1/csv/design_search.csv')
-classification <- fread('/Volumes/EXTERNALHD1/csv/classification.csv')
+#design_search <- fread('/Volumes/EXTERNALHD1/csv/design_search.csv')
+#classification <- fread('/Volumes/EXTERNALHD1/csv/classification.csv')
 intl_class <- fread('/Volumes/EXTERNALHD1/csv/intl_class.csv')
 owner <- fread('/Volumes/EXTERNALHD1/csv/owner.csv')
-attorney <- fread('/Volumes/EXTERNALHD1/csv/correspondent_domrep_attorney.csv')
+#attorney <- fread('/Volumes/EXTERNALHD1/csv/correspondent_domrep_attorney.csv')
 
 ```
 
@@ -162,7 +162,16 @@ df <- right_join(case_file, design_search, by = 'serial_no') |>
 
 ```{r code_aggregate_stats}
 
-df_no_codes <- df |>
+df_no_codes <- case_file |>
+  filter(filing_dt >= '1986-01-01', filing_dt < '2024-01-01') |>
+  mutate(year = year(filing_dt)) |>
+  filter(grepl('^2+|^3+', mark_draw_cd)) |>
+  group_by(year) |>
+  mutate(total_design_apps = n()) |>
+  ungroup() |>
+  right_join(design_search, by = 'serial_no') |>
+  select(serial_no, filing_dt, registration_no, registration_dt, publication_dt, mark_draw_cd, mark_id_char, design_search_cd, acq_dist_in, lb_use_file_in, supp_reg_in, serv_mark_in, trade_mark_in, cert_mark_in, coll_memb_mark_in, coll_serv_mark_in, coll_trade_mark_in, cert_mark_in, draw_color_cur_in, abandon_dt, reg_cancel_dt, year, total_design_apps) |>
+  filter(grepl('^2+', mark_draw_cd)) |>
   group_by(serial_no) |>
   mutate(n = n()) |>
   filter(!duplicated(serial_no)) |>
@@ -849,9 +858,7 @@ top_50_ever <- head(df_all[order(df_all$n, decreasing = TRUE), ], 50)
 
 ```{r alt_regression_df_2}
 
-library(tidyr)
-
-#intl_classes <- unique(intl_class$intl_class_cd)
+intl_classes <- unique(intl_class$intl_class_cd)
 years <- unique(df_no_codes$year)
 
 alt_regression_df_2 <- df_no_codes |>
@@ -863,7 +870,7 @@ alt_regression_df_2 <- df_no_codes |>
   pivot_wider(names_from = 'intl_class_cd', values_from = 'intl_class_yes', values_fill = 0) |>
   pivot_wider(names_from = 'year', values_from = 'year_yes', values_fill = 0) |>
   group_by(serial_no) |>
-  summarise_at(c('n', intl_classes, years, 'attorney'), max) |>
+  summarise_at(c('n', 'total_design_apps', intl_classes, years, 'attorney'), max) |>
   mutate('1986' = 0) |>
   ungroup()
 
@@ -877,10 +884,64 @@ mod5 <- lm(n ~ . - serial_no, data = alt_regression_df_2)
 
 ```{r regression_plots}
 
-setDT(as.data.frame(mod5[['coefficients']][50:87]), keep.rownames = TRUE) |>
-  rename('effect' = 'mod5[["coefficients"]][50:87]', 'year' = 'rn') |>
-  left_join(case_file_filtered_nonword_totals, by = 'year') |>
+setDT(as.data.frame(mod5[['coefficients']][51:88]), keep.rownames = TRUE) |>
+  rename('effect' = 'mod5[["coefficients"]][51:88]', 'year' = 'rn') |>
   ggplot(aes(year, effect)) +
   geom_point()
+
+```
+
+```{r no_codes_by_class}
+
+#tikz(file = './graphics/figure_9.1.tex', width = 6.25, height = 4)
+
+alt_regression_df_2 |>
+  filter(n > 5) |>
+  select(all_of(intl_classes)) |>
+  apply(2, sum) |>
+  as.data.frame() |>
+  setDT(keep.rownames = TRUE) |>
+  rename('n' = 'apply(select(filter(alt_regression_df_2, n > 5), all_of(intl_classes)), 2, sum)', 'intl_class_cd' = 'rn') |>
+  left_join(case_file_filtered |>
+              left_join(intl_class, by = 'serial_no') |>
+              group_by(intl_class_cd) |>
+              filter(grepl('^2+|^3+', mark_draw_cd)) |>
+              summarise(total = n()) |>
+              ungroup()) |>
+  mutate(percentage = n/total) |>
+  ggplot(aes(intl_class_cd, percentage)) +
+  geom_bar(stat='identity') +
+  labs(y = 'Number of Applications with $>$ 5 Codes', x = 'Iternational Class')
+
+#dev.off()
+
+```
+
+```{r owner_analysis}
+
+case_file |>
+  filter((filing_dt >= '1986-01-01'), (filing_dt < '2024-01-01')) |> # removes all rows where filing_dt is NA
+  select(serial_no, mark_draw_cd, filing_dt) |>
+  left_join(owner, by = 'serial_no') |>
+  group_by(own_name) |>
+  #arrange(own_type_cd, .by_group = TRUE) |>
+  filter(!duplicated(serial_no)) |>
+  filter(grepl('^Disney[[:space:]]Enterprises', own_name)) |>
+  ungroup() |>
+  left_join(intl_class, by = 'serial_no')
+  
+  
+  #group_by(intl_class_cd) |>
+  #summarise(n = n())
+
+#^Microsoft[[:space:]]Corp|^Summit[[:space:]]Entertainment|J[[:punct:]][[:space:]]Gallo[[:space:]]Winery\\b|^Societe[[:space:]]des[[:space:]]Produits[[:space:]]Nestle|^Apple[[:space:]]Inc|^JOHNSON[[:space:]][[:punct:]][[:space:]]JOHNSON|^DA[[:space:]]LIAN[[:space:]]YA[[:space:]]TU[[:space:]]TOU[[:space:]]ZI[[:space:]]ZI[[:space:]]XUN[[:space:]]YOU[[:space:]]XIAN[[:space:]]GONG[[:space:]]SI|^PK[[:space:]]Retail[[:space:]]Holdings[[:space:]]Inc|^Paisley[[:space:]]Park[[:space:]]Enterprises\\b
+
+#df_no_codes |>
+  #left_join(owner, by = 'serial_no') |>
+  #filter(n > 5) |>
+  #group_by(own_name) |>
+  #filter(!duplicated(serial_no)) |>
+  #summarise(n = n()) |>
+  #slice_max(n, n = 10)
 
 ```
