@@ -14,11 +14,11 @@ library(tikzDevice)
 options(tz = 'America/New_York')
 
 case_file <- fread('/Volumes/EXTERNALHD1/csv/case_file.csv')
-#design_search <- fread('/Volumes/EXTERNALHD1/csv/design_search.csv')
+design_search <- fread('/Volumes/EXTERNALHD1/csv/design_search.csv')
 #classification <- fread('/Volumes/EXTERNALHD1/csv/classification.csv')
 intl_class <- fread('/Volumes/EXTERNALHD1/csv/intl_class.csv')
 owner <- fread('/Volumes/EXTERNALHD1/csv/owner.csv')
-#attorney <- fread('/Volumes/EXTERNALHD1/csv/correspondent_domrep_attorney.csv')
+attorney <- fread('/Volumes/EXTERNALHD1/csv/correspondent_domrep_attorney.csv')
 
 ```
 
@@ -171,8 +171,13 @@ df_no_codes <- case_file |>
   ungroup() |>
   right_join(design_search, by = 'serial_no') |>
   select(serial_no, filing_dt, registration_no, registration_dt, publication_dt, mark_draw_cd, mark_id_char, design_search_cd, acq_dist_in, lb_use_file_in, supp_reg_in, serv_mark_in, trade_mark_in, cert_mark_in, coll_memb_mark_in, coll_serv_mark_in, coll_trade_mark_in, cert_mark_in, draw_color_cur_in, abandon_dt, reg_cancel_dt, year, total_design_apps) |>
+  mutate(basic = case_when((design_search_cd %in% basic_stripped$design_search_cd) == TRUE ~ 1, TRUE ~ 0)) |>
+  group_by(year) |>
+  mutate(total_design_codes = n()) |>
+  ungroup() |>
   filter(grepl('^2+', mark_draw_cd)) |>
   group_by(serial_no) |>
+  mutate(n_basic = sum(basic)) |>
   mutate(n = n()) |>
   filter(!duplicated(serial_no)) |>
   ungroup()
@@ -870,7 +875,8 @@ alt_regression_df_2 <- df_no_codes |>
   pivot_wider(names_from = 'intl_class_cd', values_from = 'intl_class_yes', values_fill = 0) |>
   pivot_wider(names_from = 'year', values_from = 'year_yes', values_fill = 0) |>
   group_by(serial_no) |>
-  summarise_at(c('n', 'total_design_apps', intl_classes, years, 'attorney'), max) |>
+  mutate(highcode = case_when(n > 5 ~ 1, TRUE ~ 0)) |>
+  summarise_at(c('highcode', 'n_basic', 'n', 'total_design_apps', 'total_design_codes', intl_classes, years, 'attorney'), max) |>
   mutate('1986' = 0) |>
   ungroup()
 
@@ -878,14 +884,24 @@ alt_regression_df_2 <- df_no_codes |>
 
 ```{r lm_to_control_for_time}
 
-mod5 <- lm(n ~ . - serial_no, data = alt_regression_df_2)
+mod5 <- lm(n ~ . - serial_no - total_design_codes - highcode, data = alt_regression_df_2)
+
+mod5$coefficients[is.na(mod5$coefficients)] <- 0
+
+```
+
+```{r logit_to_control_for_time}
+
+mod6 <- glm(highcode ~ . - serial_no - total_design_codes - total_design_apps - n, family = binomial, data = alt_regression_df_2)
+
+mod6$coefficients[is.na(mod6$coefficients)] <- 0
 
 ```
 
 ```{r regression_plots}
 
-setDT(as.data.frame(mod5[['coefficients']][51:88]), keep.rownames = TRUE) |>
-  rename('effect' = 'mod5[["coefficients"]][51:88]', 'year' = 'rn') |>
+setDT(as.data.frame(mod6[['coefficients']][51:88]), keep.rownames = TRUE) |>
+  rename('effect' = 'mod6[["coefficients"]][51:88]', 'year' = 'rn') |>
   ggplot(aes(year, effect)) +
   geom_point()
 
@@ -943,5 +959,29 @@ case_file |>
   #filter(!duplicated(serial_no)) |>
   #summarise(n = n()) |>
   #slice_max(n, n = 10)
+
+```
+
+```{r intl_class_analysis}
+
+df_by_intl_class <- df |>
+  #filter(supp_reg_in == '0') |>
+  #filter(filing_dt > '2007-01-07')
+  mutate(writing = case_when(grepl('^27+|^28+|^2901+', design_search_cd) == TRUE ~ 1, TRUE ~ 0)) |>
+  group_by(serial_no) |>
+  filter(max(writing) != '1') |>
+  mutate(n = n()) |>
+  ungroup() |>
+  filter(!duplicated(serial_no)) |>
+  filter(n > 5) |>
+  left_join(intl_class, by = 'serial_no') |>
+  group_by(intl_class_cd, year) |>
+  summarise(n = n()) |>
+  pivot_wider(names_from = intl_class_cd, values_from = n, values_fill = 0) |>
+  full_join(case_file_filtered_totals, by = 'year') |>
+  mutate(across(c(2:49), ~ .x/app_total)) |>
+  summarise(across(c(2:49), ~ .x[38] - .x[1])) |>
+  t()
+  #group_by(year)
 
 ```
