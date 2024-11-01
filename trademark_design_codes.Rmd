@@ -9,6 +9,7 @@ Plot number of trademark applications/registrations per year from 1986-2023.
 library(data.table)
 library(dplyr)
 library(lubridate)
+library(forcats)
 library(ggplot2)
 library(tikzDevice)
 options(tz = 'America/New_York')
@@ -35,17 +36,14 @@ case_file_filtered_totals <- case_file_filtered |>
   group_by(year) |>
   mutate(app_total = n()) |>
   ungroup() |>
-  filter(!(is.na(registration_dt) | grepl('^0+', registration_no))) |>
+  filter(!(is.na(publication_dt))) |>
   group_by(year) |>
-  mutate(reg_total = n()) |>
-  select(year, app_total, reg_total) |>
-  filter(!duplicated(year))
-
-case_file_filtered_percentages <- case_file_filtered_totals |>
-  mutate(percentage = reg_total/app_total)
+  mutate(pub_total = n()) |>
+  select(year, app_total, pub_total) |>
+  filter(!duplicated(year)) |>
+  mutate(percentage_published = pub_total/app_total)
   
-molten_filtered_totals <- melt(case_file_filtered_totals, id = 'year')
-molten_filtered_totals$variable <- factor(molten_filtered_totals$variable, levels = rev(levels(molten_filtered_totals$variable)))
+molten_filtered_totals <- pivot_longer(select(case_file_filtered_totals, year, app_total, pub_total), cols = c('app_total', 'pub_total'), names_to = 'variable', values_to = 'total')
 
 ```
 
@@ -55,10 +53,10 @@ theme_set(theme_classic())
 
 tikz(file = './graphics/figure_1.tex', width = 4.5, height = 3.5)
 
-figure_1 <- ggplot(molten_filtered_totals, aes(year, value, fill = variable)) +
+figure_1 <- ggplot(molten_filtered_totals, aes(year, total, fill = variable)) +
   geom_col(position = 'dodge') +
   labs(x = 'Year', y = 'Number') +
-  scale_fill_manual(name = '', labels = c('Registrations', 'Applications'), values = c('#099999', '#203769')) +
+  scale_fill_manual(name = '', labels = c('Applications', 'Publications'), values = c('#203769', '#099999')) +
   scale_x_continuous(breaks = seq(1985, 2025, by = 5), limits = c(1986, 2023), expand = c(0, 0)) +
   scale_y_continuous(breaks = seq(0, 700000, by = 100000), expand = c(0, 0), labels = scales::label_comma()) +
   theme(axis.title.x = element_text(vjust = -2, size = 10),
@@ -71,7 +69,7 @@ figure_1
 dev.off()
 ```
 
-Plot number of nonword trademark applications/registrations per year from 1986-2023.
+Plot number of nonword trademark applications/publications per year from 1986-2023.
 
 ```{r nonword_totals}
 
@@ -83,14 +81,14 @@ case_file_filtered_nonword_totals <- case_file_nonword_filtered |>
   group_by(year) |>
   mutate(app_total_nonword = n()) |>
   ungroup() |>
-  filter(!(is.na(registration_dt) | grepl('^0+', registration_no))) |>
+  filter(!(is.na(publication_dt))) |>
   group_by(year) |>
-  mutate(reg_total_nonword = n()) |>
-  select(year, app_total_nonword, reg_total_nonword) |>
+  mutate(pub_total_nonword = n()) |>
+  select(year, app_total_nonword, pub_total_nonword) |>
   filter(!duplicated(year))
 
 case_file_filtered_nonword_percentages <- case_file_filtered_nonword_totals |>
-  mutate(percentage = reg_total_nonword/app_total_nonword)
+  mutate(percentage = pub_total_nonword/pub_total_nonword)
   
 molten_filtered_nonword_totals <- melt(case_file_filtered_nonword_totals, id = 'year')
 molten_filtered_nonword_totals$variable <- factor(molten_filtered_nonword_totals$variable, levels = rev(levels(molten_filtered_nonword_totals$variable)))
@@ -110,7 +108,7 @@ tikz(file = './graphics/figure_2.tex', width = 4.5, height = 4)
 figure_2 <- ggplot(molten_filtered_nonword_totals, aes(year, value, fill = variable)) +
   geom_col(position = 'dodge') +
   labs(x = 'Year', y = 'Number') +
-  scale_fill_manual(name = '', labels = c('Registrations', 'Applications'), values = c('#099999', '#203769')) +
+  scale_fill_manual(name = '', labels = c('Publications', 'Applications'), values = c('#099999', '#203769')) +
   scale_x_continuous(breaks = seq(1985, 2025, by = 5), limits = c(1986, 2023), expand = c(0, 0)) +
   scale_y_continuous(breaks = seq(0, 18000, by = 1000), expand = c(0, 0), labels = scales::label_comma()) +
   theme(axis.title.x = element_text(vjust = -2, size = 10),
@@ -130,7 +128,7 @@ dev.off()
 tikz(file = './graphics/figure_3.tex', width = 4, height = 3)
 
 figure_3 <- ggplot(merged_app_totals, aes(year, percentage)) +
-  geom_line(linewidth = 1.5) +
+  geom_line(linewidth = 1.25) +
   labs(x = 'Year', y = 'Nonword Applications \n / Total Applications') +
   scale_x_continuous(breaks = seq(1985, 2025, by = 5), limits = c(1986, 2023), expand = c(0, 0)) +
   scale_y_continuous(breaks = seq(0.02, 0.05, by = 0.01), limits = c(0.02, 0.05), expand = c(0, 0)) +
@@ -151,11 +149,9 @@ Compute aggregate stats for nonword marks:
 
 # merge design_search data with case_file data
 
-df <- right_join(case_file, design_search, by = 'serial_no') |>
+df <- right_join(case_file_filtered, design_search, by = 'serial_no') |>
   select(serial_no, filing_dt, registration_no, registration_dt, publication_dt, mark_draw_cd, mark_id_char, design_search_cd, acq_dist_in, lb_use_file_in, supp_reg_in, serv_mark_in, trade_mark_in, cert_mark_in, coll_memb_mark_in, coll_serv_mark_in, coll_trade_mark_in, cert_mark_in, draw_color_cur_in, abandon_dt, reg_cancel_dt) |>
-  filter(filing_dt >= '1986-01-01', filing_dt < '2024-01-01') |>
-  filter(grepl('^2+', mark_draw_cd)) |>
-  mutate(year = year(filing_dt))
+  filter(grepl('^2+', mark_draw_cd))
   
 
 ```
@@ -353,8 +349,7 @@ super_percentages_per_year[is.na(super_percentages_per_year)] <- 0
 tikz(file = './graphics/figure_7.tex', width = 5.75, height = 3.5)
 
 figure_7.0 <- ggplot(super_percentages_per_year, aes(year, percentage5)) +
-  geom_point() +
-  geom_smooth() +
+  geom_line() +
   labs(x = 'Year', y = 'Nonword Applications with $>$ 5 Codes\n / All Applications') +
   scale_x_continuous(breaks = seq(1985, 2023, by = 5), expand = c(0, 0)) +
   scale_y_continuous(breaks = seq(0.001, 0.005, by = 0.001), limits = c(0.001, 0.005), expand = c(0, 0)) +
@@ -364,8 +359,7 @@ figure_7.0 <- ggplot(super_percentages_per_year, aes(year, percentage5)) +
         axis.text.y = element_text(size = 6))
 
 figure_7.1 <- ggplot(super_percentages_per_year, aes(year, percentage10)) +
-  geom_point() +
-  geom_smooth() +
+  geom_line() +
   labs(x = 'Year', y = 'Nonword Applications with $>$ 10 Codes\n / All Applications') +
   scale_x_continuous(breaks = seq(1985, 2023, by = 5), expand = c(0, 0)) +
   scale_y_continuous(labels = scales::label_number(), expand = c(0, 0)) +
@@ -375,8 +369,7 @@ figure_7.1 <- ggplot(super_percentages_per_year, aes(year, percentage10)) +
         axis.text.y = element_text(size = 6))
 
 figure_7.2 <- ggplot(super_percentages_per_year, aes(year, percentage15)) +
-  geom_point() +
-  geom_smooth() +
+  geom_line() +
   labs(x = 'Year', y = 'Nonword Applications with $>$ 15 Codes\n / All Applications') +
   scale_x_continuous(breaks = seq(1985, 2023, by = 5), expand = c(0, 0)) +
   scale_y_continuous(labels = scales::label_number(), expand = c(0, 0)) +
