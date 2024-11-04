@@ -9,6 +9,7 @@ Plot number of trademark applications/registrations per year from 1986-2023.
 library(data.table)
 library(dplyr)
 library(tidyr)
+library(stringr)
 library(lubridate)
 library(ggplot2)
 library(patchwork)
@@ -32,7 +33,7 @@ case_file_filtered <- case_file |>
   filter((filing_dt >= '1986-01-01'), (filing_dt < '2024-01-01')) |> # removes all rows where filing_dt is NA
   mutate(year = year(filing_dt)) |>
   select(serial_no, filing_dt, registration_no, registration_dt, publication_dt, mark_draw_cd, mark_id_char, acq_dist_in, lb_use_file_in, supp_reg_in, serv_mark_in, trade_mark_in, cert_mark_in, coll_memb_mark_in, coll_serv_mark_in, coll_trade_mark_in, cert_mark_in, draw_color_cur_in, abandon_dt, reg_cancel_dt, year) |>
-  arrange(filing_dt)
+  arrange('filing_dt')
 
 case_file_filtered_totals <- case_file_filtered |>
   #filter(grepl('^1+|^3+|^4+|^5+', mark_draw_cd)) |>
@@ -78,6 +79,10 @@ Plot number of nonword trademark applications/publications per year from 1986-20
 ```{r nonword_totals}
 
 case_file_filtered_nonword_totals <- case_file_filtered |>
+  filter(grepl('^2+|^6+', mark_draw_cd)) |>
+  group_by(year) |>
+  mutate(app_total_nontraditional = n()) |>
+  ungroup() |>
   filter(grepl('^2+', mark_draw_cd)) |>
   #filter(supp_reg_in == 0) |>
   group_by(year) |>
@@ -86,14 +91,15 @@ case_file_filtered_nonword_totals <- case_file_filtered |>
   filter(!(is.na(publication_dt))) |>
   group_by(year) |>
   mutate(pub_total_nonword = n()) |>
-  select(year, app_total_nonword, pub_total_nonword) |>
+  select(year, app_total_nontraditional, app_total_nonword, pub_total_nonword) |>
   filter(!duplicated(year)) |>
-  mutate(percentage = pub_total_nonword/pub_total_nonword)
+  mutate(percentage_nonword_published = pub_total_nonword/app_total_nonword)
   
 molten_filtered_nonword_totals <- pivot_longer(select(case_file_filtered_nonword_totals, year, pub_total_nonword, app_total_nonword), cols = c('pub_total_nonword', 'app_total_nonword'), names_to = 'variable', values_to = 'total')
 
 merged_app_totals <- full_join(case_file_filtered_totals, case_file_filtered_nonword_totals, by = 'year') |>
-  select(year, app_total, app_total_nonword) |>
+  select(year, app_total_nontraditional, app_total, app_total_nonword) |>
+  mutate(percentage_nontraditional = app_total_nontraditional/app_total) |>
   mutate(percentage_nonword = app_total_nonword/app_total)
 
 ```
@@ -148,7 +154,6 @@ Compute aggregate stats for nonword marks:
 # merge design_search data with case_file data
 
 df <- right_join(case_file_filtered, design_search, by = 'serial_no') |>
-  arrange('filing_dt') |>
   filter(grepl('^2+', mark_draw_cd))
   
 ```
@@ -171,14 +176,20 @@ df_no_codes <- case_file |>
   right_join(design_search, by = 'serial_no') |>
   select(serial_no, filing_dt, registration_no, registration_dt, publication_dt, mark_draw_cd, mark_id_char, design_search_cd, acq_dist_in, lb_use_file_in, supp_reg_in, serv_mark_in, trade_mark_in, cert_mark_in, coll_memb_mark_in, coll_serv_mark_in, coll_trade_mark_in, cert_mark_in, draw_color_cur_in, abandon_dt, reg_cancel_dt, year, total_design_apps) |>
   mutate(basic = case_when((design_search_cd %in% basic_stripped$design_search_cd) == TRUE ~ 1, TRUE ~ 0)) |>
+  mutate(nonbasic = case_when((design_search_cd %in% basic_stripped$design_search_cd) == FALSE ~ 1, TRUE ~ 0)) |>
   group_by(year) |>
   mutate(total_design_codes = n()) |>
   ungroup() |>
   filter(grepl('^2+', mark_draw_cd)) |>
   group_by(serial_no) |>
   mutate(n_basic = sum(basic)) |>
+  mutate(n_nonbasic = sum(nonbasic)) |>
   mutate(n = n()) |>
   filter(!duplicated(serial_no)) |>
+  mutate(percentage_basic = n_basic/n) |>
+  ungroup() |>
+  group_by(year) |>
+  mutate(ratio_basic_nonbasic = sum(n_basic)/sum(n_nonbasic)) |>
   ungroup()
 
 mean(df_no_codes$n)
@@ -344,34 +355,26 @@ Switch to focus on number of different categories of design codes:
 
 ```{r category_aggregate_stats}
 
-library(stringr)
-
 df_no_categories <- df |>
+  group_by(serial_no) |>
+  mutate(n = n()) |>
+  ungroup() |>
   mutate(category = str_sub(design_search_cd, 0, -5)) |>
   group_by(serial_no) |>
-  summarise(n = length(unique(category)))
+  mutate(n_category = length(unique(category))) |>
+  filter(!duplicated(serial_no)) |>
+  ungroup()
 
-mean(df_no_categories$n)
-median(df_no_categories$n)
-
-#ggplot(df_no_categories, aes(n)) +
-  #geom_histogram(binwidth = 1, aes(y = ..density..)) +
-  #stat_function(fun = dnorm, colour = "red", args = list(mean = mean(df_no_categories$n), sd = sd(df_no_categories$n))) +
-  #theme_classic()
+mean(df_no_categories$n_category)
+median(df_no_categories$n_category)
 
 ```
 
 ```{r category_per_year_stats}
 
-df_2 <- df |>
-  mutate(category = str_sub(design_search_cd, 0, -5)) |>
-  group_by(serial_no) |>
-  mutate(n = length(unique(category))) |>
-  ungroup()
-
-df_no_categories_per_year <- df_2 |>
+df_no_categories_per_year <- df_no_categories |>
   group_by(year) |>
-  summarise(mean = mean(n), median = median(n))
+  summarise(mean = mean(n_category), median = median(n_category))
 
 figure_I.1 <- ggplot(df_no_categories_per_year, aes(year, mean)) +
   geom_point() +
@@ -395,213 +398,124 @@ figure_I.1 + figure_I.2
 
 ```{r supercat_calculations}
 
-df_3 <- df_2 |>
-  filter(!duplicated(serial_no)) |>
-  group_by(year)
-
-super3cat_totals_per_year <- df_3 |>
-  filter(n > 3) |>
-  summarise(super3 = n())
-
-super5cat_totals_per_year <- df_3 |>
-  filter(n > 5) |>
-  summarise(super5 = n())
-
-super7cat_totals_per_year <- df_3 |>
-  filter(n > 7) |>
-  summarise(super7 = n())
-
-supercat_totals_per_year <- super3cat_totals_per_year |>
-  full_join(super5cat_totals_per_year, by = 'year') |>
-  full_join(super7cat_totals_per_year, by = 'year')
-
-```
-
-```{r supercat_percentage}
-
-figure_8.1 <- ggplot(supercat_totals_per_year, aes(year, super3)) +
-  geom_col() +
-  labs(x = 'Year', y = 'Number of Applications with > 3 Categories') +
-  scale_x_continuous(breaks = seq(1985, 2023, by = 10), expand = c(0, 0)) +
-  scale_y_continuous(expand = c(0, 0))
-
-supercat_percentages_per_year <- supercat_totals_per_year |>
-  full_join(case_file_filtered_totals, by = 'year') |>
-  full_join(case_file_filtered_nonword_totals, by = 'year') |>
+supercat_totals_per_year <- df_no_categories |>
+  mutate(super3 = case_when(n_category > 3 ~ 1, TRUE ~ 0)) |>
+  mutate(super5 = case_when(n_category > 5 ~ 1, TRUE ~ 0)) |>
+  mutate(super7 = case_when(n_category > 7 ~ 1, TRUE ~ 0)) |>
+  select(year, super3, super5, super7) |>
+  group_by(year) |>
+  mutate(super3 = sum(super3)) |>
+  mutate(super5 = sum(super5)) |>
+  mutate(super7 = sum(super7)) |>
+  ungroup() |>
+  filter(!duplicated(year)) |>
+  full_join(case_file_filtered_totals) |>
+  full_join(case_file_filtered_nonword_totals) |>
   mutate(percentage3 = super3/app_total) |>
   mutate(percentage5 = super5/app_total) |>
   mutate(percentage7 = super7/app_total)
 
-figure_8.2 <- ggplot(supercat_percentages_per_year, aes(year, percentage3)) +
-  geom_point() +
-  labs(x = 'Year', y = 'Nonword Applications with > 3 Categories\n / All Applications') +
-  geom_smooth()
-
-figure_8.1 + figure_8.2
-
 ```
+
 
 ```{r nonbasic_stats}
 
-df_basic <- df |>
-  semi_join(basic_stripped, by = 'design_search_cd') |>
-  mutate(n = 0) |>
-  ungroup()
-
-df_4 <- df |>
-  anti_join(basic_stripped, by = 'design_search_cd') |>
-  group_by(serial_no) |>
-  mutate(n = n()) |>
-  ungroup() |>
-  rbind(df_basic) |>
-  group_by(serial_no) |>
-  mutate(no_nonbasic = max(unique(n))) |>
-  filter(!duplicated(serial_no)) |>
-  ungroup()
-
-mean(df_4$no_nonbasic)
-median(df_4$no_nonbasic)
+mean(df_no_codes$n_nonbasic)
+median(df_no_codes$n_nonbasic)
 
 ```
 
-```{r nonbasic_stats_per_year}
+```{r nonbasic_per_year_stats}
 
-df_5 <- df |> # applications with at least one non-basic code
-  #filter(supp_reg_in == '0')
-  anti_join(basic_stripped, by = 'design_search_cd') |>
-  filter(!duplicated(serial_no)) |>
+df_no_nonbasic_per_year <- df_no_codes |>
   group_by(year) |>
-  summarise(n = n()) |>
-  full_join(case_file_filtered_totals, by = 'year') |>
-  full_join(case_file_filtered_nonword_totals, by = 'year') |>
-  mutate(percentage = n/app_total)
+  summarise(mean = mean(n_nonbasic), median = median(n_nonbasic))
 
-figure_IV.1 <- ggplot(df_5, aes(year, n)) +
-  geom_col() +
-  labs(x = 'Year', y = 'Number of Applications with Non-Basic Codes') +
+figure_I.1 <- ggplot(df_no_nonbasic_per_year, aes(year, mean)) +
+  geom_point() +
+  geom_line() +
+  labs(x = 'Year', y = 'Mean') +
   scale_x_continuous(breaks = seq(1985, 2024, by = 5), limits = c(1985, 2024), expand = c(0, 0)) +
-  scale_y_continuous(expand = c(0, 0)) +
+  scale_y_continuous(breaks = seq(0, 5), limits = c(0, 5), expand = c(0, 0)) +
   theme_classic()
 
-figure_IV.2 <- ggplot(df_5, aes(year, percentage)) +
-  geom_col() +
-  labs(x = 'Year', y = 'Number of Applications with Non-Basic Codes / Total Applications') +
+figure_I.2 <- ggplot(df_no_nonbasic_per_year, aes(year, median)) +
+  geom_point() +
+  geom_line() +
+  labs(x = 'Year', y = 'Median') +
   scale_x_continuous(breaks = seq(1985, 2024, by = 5), limits = c(1985, 2024), expand = c(0, 0)) +
-  scale_y_continuous(expand = c(0, 0)) +
+  scale_y_continuous(breaks = seq(0, 5), limits = c(0, 5), expand = c(0, 0)) +
   theme_classic()
 
-figure_IV.1 + figure_IV.2
+figure_I.1 + figure_I.2
 
 ```
 
-```{r nonbasic_alternative_calculations_I}
+```{r supernonbasic_calculations}
 
-# counts how many _NONBASIC_
-
-df_6 <- df |>
-  anti_join(basic_stripped, by = 'design_search_cd') |>
-  group_by(serial_no) |>
-  mutate(n = n()) |>
+supernonbasic_totals_per_year <- df_no_codes |>
+  mutate(super0 = case_when(n_nonbasic > 0 ~ 1, TRUE ~ 0)) |>
+  mutate(super3 = case_when(n_nonbasic > 3 ~ 1, TRUE ~ 0)) |>
+  mutate(super5 = case_when(n_nonbasic > 5 ~ 1, TRUE ~ 0)) |>
+  select(year, super0, super3, super5) |>
+  group_by(year) |>
+  mutate(super0 = sum(super0)) |>
+  mutate(super3 = sum(super3)) |>
+  mutate(super5 = sum(super5)) |>
   ungroup() |>
-  rbind(df_basic) |>
-  group_by(serial_no) |>
-  mutate(no_nonbasic = max(unique(n))) |>
-  filter(!duplicated(serial_no)) |>
-  ungroup() |>
-  group_by(year)
-
-super3nonbasic_totals_per_year <- df_6 |>
-  filter(no_nonbasic > 3) |>
-  summarise(super3 = n())
-
-super5nonbasic_totals_per_year <- df_6 |>
-  filter(no_nonbasic > 5) |>
-  summarise(super5 = n())
-
-super10nonbasic_totals_per_year <- df_6 |>
-  filter(no_nonbasic > 10) |>
-  summarise(super10 = n())
-
-super15nonbasic_totals_per_year <- df_6 |>
-  filter(no_nonbasic > 15) |>
-  summarise(super15 = n())
-
-supernonbasic_totals_per_year <- super3nonbasic_totals_per_year |>
-  full_join(super5nonbasic_totals_per_year, by = 'year') |>
-  full_join(super10nonbasic_totals_per_year, by = 'year') |>
-  full_join(super15nonbasic_totals_per_year, by = 'year') |>
-  full_join(case_file_filtered_totals, by = 'year') |>
-  full_join(case_file_filtered_nonword_totals, by = 'year') |>
+  filter(!duplicated(year)) |>
+  full_join(case_file_filtered_totals) |>
+  full_join(case_file_filtered_nonword_totals) |>
+  mutate(percentage0 = super0/app_total) |>
   mutate(percentage3 = super3/app_total) |>
-  mutate(percentage5 = super5/app_total) |>
-  mutate(percentage10 = super10/app_total) |>
-  mutate(percentage15 = super15/app_total)
+  mutate(percentage5 = super5/app_total)
 
 ```
 
-```{r nonbasic_alternative_calculations_II}
+```{r basic_per_year_stats}
 
-# counts how many _BASIC_ codes
+df_no_basic_per_year <- df_no_codes |>
+  group_by(year) |>
+  summarise(mean = mean(n_basic), median = median(n_basic))
 
-df_basic_counted <- df |>
-  semi_join(basic_stripped, by = 'design_search_cd') |>
-  group_by(serial_no) |>
-  mutate(n = n()) |>
-  ungroup()
+figure_II.1 <- ggplot(df_no_nonbasic_per_year, aes(year, mean)) +
+  geom_point() +
+  geom_line() +
+  labs(x = 'Year', y = 'Mean') +
+  scale_x_continuous(breaks = seq(1985, 2024, by = 5), limits = c(1985, 2024), expand = c(0, 0)) +
+  scale_y_continuous(breaks = seq(0, 5), limits = c(0, 5), expand = c(0, 0)) +
+  theme_classic()
 
-df_7 <- df |>
-  anti_join(basic_stripped, by = 'design_search_cd') |>
-  mutate(n = 0) |>
-  rbind(df_basic_counted) |>
-  group_by(serial_no) |>
-  mutate(no_basic = max(unique(n))) |>
-  filter(!duplicated(serial_no)) |>
+figure_II.2 <- ggplot(df_no_nonbasic_per_year, aes(year, median)) +
+  geom_point() +
+  geom_line() +
+  labs(x = 'Year', y = 'Median') +
+  scale_x_continuous(breaks = seq(1985, 2024, by = 5), limits = c(1985, 2024), expand = c(0, 0)) +
+  scale_y_continuous(breaks = seq(0, 5), limits = c(0, 5), expand = c(0, 0)) +
+  theme_classic()
+
+figure_II.1 + figure_II.2
+
+```
+
+```{r supernonbasic_calculations}
+
+superbasic_totals_per_year <- df_no_codes |>
+  mutate(super0 = case_when(n_basic > 0 ~ 1, TRUE ~ 0)) |>
+  mutate(super3 = case_when(n_basic > 3 ~ 1, TRUE ~ 0)) |>
+  mutate(super5 = case_when(n_basic > 5 ~ 1, TRUE ~ 0)) |>
+  select(year, super0, super3, super5) |>
+  group_by(year) |>
+  mutate(super0 = sum(super0)) |>
+  mutate(super3 = sum(super3)) |>
+  mutate(super5 = sum(super5)) |>
   ungroup() |>
-  group_by(year)
-
-super3basic_totals_per_year <- df_7 |>
-  filter(no_basic > 3) |>
-  summarise(super3 = n())
-
-super5basic_totals_per_year <- df_7 |>
-  filter(no_basic > 5) |>
-  summarise(super5 = n())
-
-super10basic_totals_per_year <- df_7 |>
-  filter(no_basic > 10) |>
-  summarise(super10 = n())
-
-super15basic_totals_per_year <- df_7 |>
-  filter(no_basic > 15) |>
-  summarise(super15 = n())
-
-superbasic_totals_per_year <- super3basic_totals_per_year |>
-  full_join(super5basic_totals_per_year, by = 'year') |>
-  full_join(super10basic_totals_per_year, by = 'year') |>
-  full_join(super15basic_totals_per_year, by = 'year') |>
-  full_join(case_file_filtered_totals, by = 'year') |>
-  full_join(case_file_filtered_nonword_totals, by = 'year') |>
+  filter(!duplicated(year)) |>
+  full_join(case_file_filtered_totals) |>
+  full_join(case_file_filtered_nonword_totals) |>
+  mutate(percentage0 = super0/app_total) |>
   mutate(percentage3 = super3/app_total) |>
-  mutate(percentage5 = super5/app_total) |>
-  mutate(percentage10 = super10/app_total) |>
-  mutate(percentage15 = super15/app_total)
-
-figure_V.1 <- ggplot(superbasic_totals_per_year, aes(year, percentage3)) +
-  geom_point() +
-  labs(x = 'Year', y = 'Nonword Applications with > 3 Basic Codes \n / All Applications') +
-  geom_smooth()
-
-figure_V.2 <- ggplot(superbasic_totals_per_year, aes(year, percentage5)) +
-  geom_point() +
-  labs(x = 'Year', y = 'Nonword Applications with > 5 Basic Codes \n / All Applications') +
-  geom_smooth()
-
-figure_V.3 <- ggplot(superbasic_totals_per_year, aes(year, percentage10)) +
-  geom_point() +
-  labs(x = 'Year', y = 'Nonword Applications with > 10 Basic Codes \n / All Applications') +
-  geom_smooth()
-
-figure_V.1 + figure_V.2 + figure_V.3
+  mutate(percentage5 = super5/app_total)
 
 ```
 
@@ -612,95 +526,58 @@ mult <- c('01.01.09', '01.01.10', '01.01.12', '01.01.13', '01.01.14', '01.03.03'
 mult_stripped <- as.data.frame(as.numeric(gsub('[[:punct:]]', '', mult))) |>
   rename('design_search_cd' = 'as.numeric(gsub(\"[[:punct:]]\", \"\", mult))')
 
-df_mult <- df |>
-  semi_join(mult_stripped, by = 'design_search_cd') |>
-  group_by(serial_no) |>
-  mutate(n = n()) |>
-  ungroup()
-
-df_8 <- df |>
-  anti_join(mult_stripped, by = 'design_search_cd') |>
-  mutate(n = 0) |>
-  rbind(df_mult) |>
-  group_by(serial_no) |>
-  mutate(no_mult = max(unique(n))) |>
-  filter(!duplicated(serial_no)) |>
+df_no_mult <- df |>
   filter(filing_dt > '2007-01-06') |>
-  ungroup()
-
-mean(df_8$no_mult)
-median(df_8$no_mult)
-
-df_8_per_year <- df_8 |>
-  group_by(year) |>
-  filter(no_mult >= 5) |>
-  summarise(n = n()) |>
-  full_join(filter(case_file_filtered_totals, year >= 2007), by = 'year') |>
-  mutate(percentage = n/app_total)
-
-#df_5_mean_per_year <- df_5 |>
-  #group_by(year) |>
-  #summarise(mean = mean(n))
-
-```
-
-```{r}
-
-ggplot(df_8_per_year, aes(year, percentage)) +
-  geom_point() +
-  geom_smooth()
-
-```
-
-```{r df_complex_basic_analysis}
-
-df_basic_counted.1 <- df_basic_counted |>
-  rename(no_basic_raw = n)
-
-df_no_complex_basic <- df |>
-  anti_join(basic_stripped, by = 'design_search_cd') |>
-  mutate(no_basic_raw = 0) |>
-  rbind(df_basic_counted.1) |>
+  mutate(mult = case_when((design_search_cd %in% mult_stripped$design_search_cd) == TRUE ~ 1, TRUE ~ 0)) |>
   group_by(serial_no) |>
-  mutate(no_codes = n()) |>
-  ungroup() |>
-  group_by(serial_no) |>
-  mutate(no_basic = max(unique(no_basic_raw))) |>
+  mutate(n_mult = sum(mult)) |>
   filter(!duplicated(serial_no)) |>
-  mutate(percentage = no_basic/no_codes) |>
   ungroup()
 
 ```
 
-```{r}
+```{r mult_per_year_stats}
 
-df_no_complex_basic |>
+df_no_mult_per_year <- df_no_mult |>
   group_by(year) |>
-  summarize(mean = mean(percentage)) |>
-  ggplot(aes(year, mean)) +
-  geom_point() +
-  geom_smooth()
+  summarise(mean = mean(n_mult), median = median(n_mult))
 
 ```
 
-```{r}
-test <- df_no_complex_basic |>
+```{r supermult_calculations}
+
+supermult_totals_per_year <- df_no_mult |>
+  mutate(super0 = case_when(n_mult > 0 ~ 1, TRUE ~ 0)) |>
+  mutate(super3 = case_when(n_mult > 3 ~ 1, TRUE ~ 0)) |>
+  mutate(super5 = case_when(n_mult > 5 ~ 1, TRUE ~ 0)) |>
+  select(year, super0, super3, super5) |>
   group_by(year) |>
-  filter(no_codes > 5) |>
-  filter(percentage > 0.5) |>
-  summarise(n = n()) |>
-  full_join(case_file_filtered_totals) |>
-  mutate(percentage_apps = n/app_total)
-  
+  mutate(super0 = sum(super0)) |>
+  mutate(super3 = sum(super3)) |>
+  mutate(super5 = sum(super5)) |>
+  ungroup() |>
+  filter(!duplicated(year)) |>
+  left_join(case_file_filtered_totals) |>
+  left_join(case_file_filtered_nonword_totals) |>
+  mutate(percentage0 = super0/app_total) |>
+  mutate(percentage3 = super3/app_total) |>
+  mutate(percentage5 = super5/app_total)
+
 ```
 
-```{r regression_df}
+```{r log_regression}
+
+# using
 
 library(tidyr)
 
 intl_classes <- unique(intl_class$intl_class_cd)
+years <- unique(df_no_codes$year)
+remove <- c('2022', '2023', '2024')
+years <- as.character(years[!years %in% remove])
 
 regression_df <- df_no_codes |>
+  select(-mark_id_char, -acq_dist_in, -lb_use_file_in, -serv_mark_in, -trade_mark_in, -cert_mark_in, -coll_memb_mark_in, -coll_serv_mark_in, -coll_trade_mark_in, -draw_color_cur_in) |>
   left_join(attorney, by = 'serial_no') |>
   left_join(intl_class, by = 'serial_no') |>
   mutate(registered = case_when(is.na(registration_dt) == FALSE & grepl('^0+', registration_no) == FALSE ~ 1, TRUE ~ 0)) |>
@@ -715,23 +592,27 @@ regression_df <- df_no_codes |>
   mutate(bin20162020 = case_when(grepl('2016|2017|2018|2019|2020', year) == TRUE ~ 1, TRUE ~ 0)) |>
   mutate(bin2021 = 0) |>
   mutate(intl_class_yes = 1) |>
-  mutate(attorney = case_when(is.na(attorney_name) == FALSE & grepl('^[0-9]+$|^$|^\\?', attorney_name) == FALSE ~ 1, TRUE ~ 0)) |>
+  mutate(year_yes = 1) |>
+  mutate(attorney = case_when((is.na(attorney_name) == FALSE & grepl('^[0-9]+$|^$|^\\?', attorney_name)) == FALSE ~ 1, TRUE ~ 0)) |>
   pivot_wider(names_from = 'intl_class_cd', values_from = 'intl_class_yes', values_fill = 0) |>
+  pivot_wider(names_from = 'year', values_from = 'year_yes', values_fill = 0) |>
+  mutate('1986' = '0') |>
   group_by(serial_no) |>
-  summarise_at(c('n', 'registered', 'published', intl_classes, 'bin19861990', 'bin19911995', 'bin19962000', 'bin20012005', 'bin20062010', 'bin20112015', 'bin20162020', 'bin2021', 'attorney'), max) |>
+  mutate(across(c('n', 'registered', 'published', all_of(intl_classes), 'bin19861990', 'bin19911995', 'bin19962000', 'bin20012005', 'bin20062010', 'bin20112015', 'bin20162020', 'bin2021', all_of(years), 'attorney'), max)) |>
+  filter(!duplicated(serial_no)) |>
   ungroup()
 
 ```
 
-```{log_regression_models}
-  
-mod1 <- glm(registered ~ n, family = binomial, data = regression_df)
+```{r log_regression_models}
 
-mod2 <- glm(registered ~ . - serial_no - published, family = binomial, data = regression_df)
+regression_df_2 <- regression_df_1 |>
+  select(serial_no, n, registered, published, all_of(intl_classes), bin19861990, bin19911995, bin19962000, bin20012005, bin20062010, bin20112015, bin20162020, bin2021, attorney)
 
-mod3 <- glm(published ~ n, family = binomial, data = regression_df)
+regression_df_3 <- regression_df_1 |>
+  select(serial_no, n, registered, published, all_of(intl_classes), all_of(years), attorney)
 
-mod4 <- glm(published ~ . - serial_no - registered, family = binomial, data = regression_df)
+mod1 <- glm(published ~ . - serial_no - registered, family = binomial, data = regression_df_3)
 
 ```
 
