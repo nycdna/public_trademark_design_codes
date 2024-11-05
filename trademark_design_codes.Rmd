@@ -567,13 +567,11 @@ supermult_totals_per_year <- df_no_mult |>
 
 ```{r log_regression}
 
-# using
-
 library(tidyr)
 
 intl_classes <- unique(intl_class$intl_class_cd)
 years <- unique(df_no_codes$year)
-remove <- c('2022', '2023', '2024')
+remove <- c('1986', '2022', '2023', '2024')
 years <- as.character(years[!years %in% remove])
 
 regression_df <- df_no_codes |>
@@ -581,7 +579,7 @@ regression_df <- df_no_codes |>
   left_join(attorney, by = 'serial_no') |>
   left_join(intl_class, by = 'serial_no') |>
   mutate(registered = case_when(is.na(registration_dt) == FALSE & grepl('^0+', registration_no) == FALSE ~ 1, TRUE ~ 0)) |>
-  mutate(published = case_when(is.na(publication_dt) == FALSE ~ 1, TRUE ~ 0)) |>
+  mutate(published = case_when((is.na(publication_dt) == FALSE | (is.na(registration_dt) == FALSE & grepl('^0+', registration_no) == FALSE)) ~ 1 , TRUE ~ 0)) |>
   filter(!grepl('2022|2023|2024', year)) |>
   mutate(bin19861990 = case_when(grepl('1986|1987|1988|1989|1990', year) == TRUE ~ 1, TRUE ~ 0)) |>
   mutate(bin19911995 = case_when(grepl('1991|1992|1993|1994|1995', year) == TRUE ~ 1, TRUE ~ 0)) |>
@@ -590,15 +588,13 @@ regression_df <- df_no_codes |>
   mutate(bin20062010 = case_when(grepl('2006|2007|2008|2009|2010', year) == TRUE ~ 1, TRUE ~ 0)) |>
   mutate(bin20112015 = case_when(grepl('2011|2012|2013|2014|2015', year) == TRUE ~ 1, TRUE ~ 0)) |>
   mutate(bin20162020 = case_when(grepl('2016|2017|2018|2019|2020', year) == TRUE ~ 1, TRUE ~ 0)) |>
-  mutate(bin2021 = 0) |>
   mutate(intl_class_yes = 1) |>
   mutate(year_yes = 1) |>
   mutate(attorney = case_when((is.na(attorney_name) == FALSE & grepl('^[0-9]+$|^$|^\\?', attorney_name)) == FALSE ~ 1, TRUE ~ 0)) |>
   pivot_wider(names_from = 'intl_class_cd', values_from = 'intl_class_yes', values_fill = 0) |>
   pivot_wider(names_from = 'year', values_from = 'year_yes', values_fill = 0) |>
-  mutate('1986' = '0') |>
   group_by(serial_no) |>
-  mutate(across(c('n', 'registered', 'published', all_of(intl_classes), 'bin19861990', 'bin19911995', 'bin19962000', 'bin20012005', 'bin20062010', 'bin20112015', 'bin20162020', 'bin2021', all_of(years), 'attorney'), max)) |>
+  mutate(across(c('n', 'registered', 'published', all_of(intl_classes), 'bin19861990', 'bin19911995', 'bin19962000', 'bin20012005', 'bin20062010', 'bin20112015', 'bin20162020', all_of(years), 'attorney'), max)) |>
   filter(!duplicated(serial_no)) |>
   ungroup()
 
@@ -606,13 +602,11 @@ regression_df <- df_no_codes |>
 
 ```{r log_regression_models}
 
-regression_df_2 <- regression_df_1 |>
-  select(serial_no, n, registered, published, all_of(intl_classes), bin19861990, bin19911995, bin19962000, bin20012005, bin20062010, bin20112015, bin20162020, bin2021, attorney)
-
-regression_df_3 <- regression_df_1 |>
-  select(serial_no, n, registered, published, all_of(intl_classes), all_of(years), attorney)
-
-mod1 <- glm(published ~ . - serial_no - registered, family = binomial, data = regression_df_3)
+regression_df_1 <- regression_df |>
+  mutate(highcode = case_when((n > 5) ~ 1, TRUE ~ 0)) |>
+  select(highcode, published, all_of(intl_classes), bin19861990, bin19911995, bin19962000, bin20012005, bin20062010, bin20112015, bin20162020, attorney)
+  
+mod1 <- glm(published ~ ., family = binomial, data = regression_df_1)
 
 ```
 
@@ -752,7 +746,7 @@ alt_regression_df_2 |>
   mutate(percentage = n/total) |>
   ggplot(aes(intl_class_cd, percentage)) +
   geom_bar(stat='identity') +
-  labs(y = 'Number of Applications with $>$ 5 Codes', x = 'Iternational Class')
+  labs(y = 'Number of Applications with $>$ 5 Codes', x = 'International Class')
 
 #dev.off()
 
