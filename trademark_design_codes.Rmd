@@ -581,20 +581,30 @@ regression_df <- df_no_codes |>
   mutate(registered = case_when(is.na(registration_dt) == FALSE & grepl('^0+', registration_no) == FALSE ~ 1, TRUE ~ 0)) |>
   mutate(published = case_when((is.na(publication_dt) == FALSE | (is.na(registration_dt) == FALSE & grepl('^0+', registration_no) == FALSE)) ~ 1 , TRUE ~ 0)) |>
   filter(!grepl('2022|2023|2024', year)) |>
-  mutate(bin19861990 = case_when(grepl('1986|1987|1988|1989|1990', year) == TRUE ~ 1, TRUE ~ 0)) |>
-  mutate(bin19911995 = case_when(grepl('1991|1992|1993|1994|1995', year) == TRUE ~ 1, TRUE ~ 0)) |>
-  mutate(bin19962000 = case_when(grepl('1996|1997|1998|1999|2000', year) == TRUE ~ 1, TRUE ~ 0)) |>
-  mutate(bin20012005 = case_when(grepl('2001|2002|2003|2004|2005', year) == TRUE ~ 1, TRUE ~ 0)) |>
-  mutate(bin20062010 = case_when(grepl('2006|2007|2008|2009|2010', year) == TRUE ~ 1, TRUE ~ 0)) |>
-  mutate(bin20112015 = case_when(grepl('2011|2012|2013|2014|2015', year) == TRUE ~ 1, TRUE ~ 0)) |>
-  mutate(bin20162020 = case_when(grepl('2016|2017|2018|2019|2020', year) == TRUE ~ 1, TRUE ~ 0)) |>
+  mutate(bin = case_when(
+    grepl('1986|1987|1988|1989|1990', year) == TRUE ~ 'bin19861990',
+    grepl('1991|1992|1993|1994|1995', year) == TRUE ~ 'bin19911995',
+    grepl('1996|1997|1998|1999|2000', year) == TRUE ~ 'bin19962000',
+    grepl('2001|2002|2003|2004|2005', year) == TRUE ~ 'bin20012005',
+    grepl('2006|2007|2008|2009|2010', year) == TRUE ~ 'bin20062010',
+    grepl('2011|2012|2013|2014|2015', year) == TRUE ~ 'bin20112015',
+    grepl('2016|2017|2018|2019|2020', year) == TRUE ~ 'bin20162020',
+    .default = 'bin2021'
+                           )) |>
+  #mutate(bin19861990 = case_when(grepl('1986|1987|1988|1989|1990', year) == TRUE ~ 1, TRUE ~ 0)) |>
+  #mutate(bin19911995 = case_when(grepl('1991|1992|1993|1994|1995', year) == TRUE ~ 1, TRUE ~ 0)) |>
+  #mutate(bin19962000 = case_when(grepl('1996|1997|1998|1999|2000', year) == TRUE ~ 1, TRUE ~ 0)) |>
+  #mutate(bin20012005 = case_when(grepl('2001|2002|2003|2004|2005', year) == TRUE ~ 1, TRUE ~ 0)) |>
+  #mutate(bin20062010 = case_when(grepl('2006|2007|2008|2009|2010', year) == TRUE ~ 1, TRUE ~ 0)) |>
+  #mutate(bin20112015 = case_when(grepl('2011|2012|2013|2014|2015', year) == TRUE ~ 1, TRUE ~ 0)) |>
+  #mutate(bin20162020 = case_when(grepl('2016|2017|2018|2019|2020', year) == TRUE ~ 1, TRUE ~ 0)) |>
   mutate(intl_class_yes = 1) |>
   mutate(year_yes = 1) |>
   mutate(attorney = case_when((is.na(attorney_name) == FALSE & grepl('^[0-9]+$|^$|^\\?', attorney_name)) == FALSE ~ 1, TRUE ~ 0)) |>
   pivot_wider(names_from = 'intl_class_cd', values_from = 'intl_class_yes', values_fill = 0) |>
   pivot_wider(names_from = 'year', values_from = 'year_yes', values_fill = 0) |>
   group_by(serial_no) |>
-  mutate(across(c('n', 'registered', 'published', all_of(intl_classes), 'bin19861990', 'bin19911995', 'bin19962000', 'bin20012005', 'bin20062010', 'bin20112015', 'bin20162020', all_of(years), 'attorney'), max)) |>
+  mutate(across(c('n', 'registered', 'published', all_of(intl_classes), 'bin', all_of(years), 'attorney'), max)) |>
   filter(!duplicated(serial_no)) |>
   ungroup()
 
@@ -604,23 +614,119 @@ regression_df <- df_no_codes |>
 
 regression_df_1 <- regression_df |>
   mutate(highcode = case_when((n > 5) ~ 1, TRUE ~ 0)) |>
-  select(highcode, published, all_of(intl_classes), bin19861990, bin19911995, bin19962000, bin20012005, bin20062010, bin20112015, bin20162020, attorney)
+  select(serial_no, highcode, published, all_of(intl_classes), bin, attorney)
   
-mod1 <- glm(published ~ ., family = binomial, data = regression_df_1)
+mod1 <- glm(published ~ . - serial_no, family = binomial, data = regression_df_1)
 
 ```
 
 ```{r regression_tables}
 library(xtable)
 
-table_1 <- summary(mod4)
+stargazer(mod1,
+          star.cutoffs = c(0.1, 0.05, 0.01),
+          #omit.stat = c("f", "adj.rsq", "ser"),
+          intercept.bottom = FALSE,
+          no.space = TRUE,
+          column.labels = c('Controls', 'No Controls'),
+          report = 'vc*s',
+          label = '',
+          title = '',
+          out = 'table_1.tex')
 
-print(xtable(head(table_1$coefficients, 2), type = "latex", caption = '{\\label{table:1} Logistic regression output (n = number of codes)}', digits = c(0, 4, 4, 4, 4)), file = "table_1.tex")
+```
 
-table_2 <- summary(mod2)
+```{r owner_analysis_general}
 
-print(xtable(head(table_2$coefficients, 2), type = "latex", caption = '{\\label{table:1} Logistic regression output (n = number of codes)}', digits = c(0, 4, 4, 4, 4)), file = "table_2.tex")
+mutate(bin = case_when(
+    grepl('1986', year) == TRUE ~ 'bin1986',
+    grepl('1987|1988|1989|1990|1991', year) == TRUE ~ 'bin19871991',
+    grepl('1992|1993|1994|1995|1996', year) == TRUE ~ 'bin19921996',
+    grepl('1997|1998|1999|2000|2001', year) == TRUE ~ 'bin19972001',
+    grepl('2002|2003|2004|2005|2006', year) == TRUE ~ 'bin20012005',
+    grepl('2007|2008|2009|2010|2011', year) == TRUE ~ 'bin20062010',
+    grepl('2012|2013|2014|2015|2016', year) == TRUE ~ 'bin20112015',
+    grepl('2017|2018|2019|2020|2021', year) == TRUE ~ 'bin20162020',
+    .default = 'bin2021'
+                           )) |>
 
+# get top 10 filers of all marks
+
+case_file_filtered |>
+  select(serial_no, mark_draw_cd, filing_dt) |>
+  left_join(owner, by = 'serial_no') |>
+  group_by(serial_no) |>
+  arrange(own_type_cd, .by_group = TRUE) |>
+  filter(!duplicated(serial_no)) |>
+  ungroup() |>
+  group_by(own_name) |>
+  summarise(n_filed = n()) |>
+  ungroup() |>
+  slice_max(n = 10, order_by = n_filed)
+
+```
+
+```{r owner_analysis_specific}
+
+# get top 10 filers of all marks
+
+df_no_codes |>
+  select(serial_no, mark_draw_cd, filing_dt, n) |>
+  filter(n > 5) |>
+  left_join(owner, by = 'serial_no') |>
+  group_by(serial_no) |>
+  arrange(own_type_cd, .by_group = TRUE) |>
+  filter(!duplicated(serial_no)) |>
+  ungroup() |>
+  group_by(own_name) |>
+  summarise(n_filed = n()) |>
+  ungroup() |>
+  slice_max(n = 10, order_by = n_filed)
+
+```
+
+```{r owner_intl_class_analysis_specific}
+
+# get top international classes in which they file
+
+top_filer_top_classes <- case_file_filtered |>
+  select(serial_no, filing_dt) |>
+  left_join(owner, by = 'serial_no') |>
+  select(own_name, own_type_cd, serial_no, filing_dt) |>
+  group_by(serial_no) |>
+  arrange(own_type_cd, .by_group = TRUE) |>
+  filter(!duplicated(serial_no)) |>
+  ungroup() |>
+  #filter(own_name == 'Microsoft Corporation' | own_name == 'E. & J. Gallo Winery' | own_name == 'Disney Enterprises, Inc.' | own_name == 'Disney Enterprises, Inc' | own_name == 'Summit Entertainment, LLC' | grepl('Societe.+\\bNestle\\b', own_name)) |>
+  filter(own_name == 'Disney Enterprises, Inc.' | own_name == 'Disney Enterprises, Inc' | own_name == 'MATTEL, INC.' | own_name == 'MATTEL INC.' | own_name == 'MATTEL, INC' | own_name == 'MATTEL INC' | own_name == 'MATTEL,INC.' | own_name == 'MATTEL , INC.' | own_name == 'MATTEL, INC,' | own_name == 'HASBRO, INC.' | own_name == 'HASBRO, INC' | own_name == 'HASBRO,. INC.' | own_name == 'HASBRO,INC.' | own_name == 'HASBRO INC.' | own_name == 'HASBRO. INC.' | own_name == 'MATTEL, INC,' | own_name == 'Glaxo Group Limited' | own_name == 'Glaxo Group Ltd.' | own_name == 'Glaxo Group Limited, a British Corporation' | own_name == 'Novartis Ag' | own_name == 'Novartis AG') |>
+  left_join(intl_class, by = 'serial_no') |>
+  group_by(intl_class_cd) |>
+  summarize(n = n())
+
+```
+
+```{r intl_class_analysis}
+
+top_movers_by_intl_class <- case_file_filtered |>
+  left_join(intl_class, by = 'serial_no') |>
+  group_by(year, intl_class_cd) |>
+  mutate(total_general = n()) |>
+  ungroup() |>
+  left_join(select(df_no_codes, n, serial_no), by = 'serial_no') |>
+  select(serial_no, total_general, intl_class_cd, year, n) |>
+  filter(n > 5) |>
+  group_by(year, intl_class_cd) |>
+  mutate(total_highcode = n()) |>
+  #mutate(percentage_increase = total_highcode/total_general) |>
+  ungroup() |>
+  filter(year == 1986 | year == 2023) |>
+  group_by(intl_class_cd) |>
+  filter(!duplicated(year)) |>
+  arrange(year, .by_group = TRUE) |>
+  mutate(percentage_change_highcode = ((total_highcode - shift(total_highcode))/shift(total_highcode) * 100) - 100) |>
+  mutate(percentage_change_general = ((total_general - shift(total_general))/shift(total_general) * 100) -100) |>
+  filter(!duplicated(intl_class_cd)) |>
+  ungroup()
 
 ```
 
