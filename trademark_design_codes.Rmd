@@ -6,6 +6,9 @@ output: html_document
 Plot number of trademark applications/registrations per year from 1986-2023.
 
 ```{r load_data}
+
+setwd("~/Desktop/Projects/Code/public_trademark_design_codes")
+
 library(data.table)
 library(dplyr)
 library(tidyr)
@@ -177,11 +180,13 @@ df_no_codes <- case_file |>
   select(serial_no, filing_dt, registration_no, registration_dt, publication_dt, mark_draw_cd, mark_id_char, design_search_cd, acq_dist_in, lb_use_file_in, supp_reg_in, serv_mark_in, trade_mark_in, cert_mark_in, coll_memb_mark_in, coll_serv_mark_in, coll_trade_mark_in, cert_mark_in, draw_color_cur_in, abandon_dt, reg_cancel_dt, year, total_design_apps) |>
   mutate(basic = case_when((design_search_cd %in% basic_stripped$design_search_cd) == TRUE ~ 1, TRUE ~ 0)) |>
   mutate(nonbasic = case_when((design_search_cd %in% basic_stripped$design_search_cd) == FALSE ~ 1, TRUE ~ 0)) |>
+  mutate(writing = case_when(grepl('^27+|^28+|^2901+', design_search_cd) == TRUE ~ 1, TRUE ~ 0)) |>
   group_by(year) |>
   mutate(total_design_codes = n()) |>
   ungroup() |>
   filter(grepl('^2+', mark_draw_cd)) |>
   group_by(serial_no) |>
+  mutate(writing = max(writing)) |>
   mutate(n_basic = sum(basic)) |>
   mutate(n_nonbasic = sum(nonbasic)) |>
   mutate(n = n()) |>
@@ -190,7 +195,9 @@ df_no_codes <- case_file |>
   ungroup() |>
   group_by(year) |>
   mutate(ratio_basic_nonbasic = sum(n_basic)/sum(n_nonbasic)) |>
-  ungroup()
+  ungroup() |>
+  filter(writing == 0)
+
 
 mean(df_no_codes$n)
 median(df_no_codes$n)
@@ -243,7 +250,7 @@ dev.off()
 ```{r super_calculations}
 
 super_totals_per_year <- df |>
-  filter(supp_reg_in == '0') |>
+  filter(supp_reg_in == 0) |>
   #filter(filing_dt > '2007-01-07') |>
   mutate(writing = case_when(grepl('^27+|^28+|^2901+', design_search_cd) == TRUE ~ 1, TRUE ~ 0)) |>
   group_by(serial_no) |>
@@ -582,14 +589,24 @@ regression_df <- df_no_codes |>
   mutate(published = case_when((is.na(publication_dt) == FALSE | (is.na(registration_dt) == FALSE & grepl('^0+', registration_no) == FALSE)) ~ 1 , TRUE ~ 0)) |>
   filter(!grepl('2022|2023|2024', year)) |>
   mutate(bin = case_when(
-    grepl('1986|1987|1988|1989|1990', year) == TRUE ~ 'bin19861990',
-    grepl('1991|1992|1993|1994|1995', year) == TRUE ~ 'bin19911995',
-    grepl('1996|1997|1998|1999|2000', year) == TRUE ~ 'bin19962000',
-    grepl('2001|2002|2003|2004|2005', year) == TRUE ~ 'bin20012005',
-    grepl('2006|2007|2008|2009|2010', year) == TRUE ~ 'bin20062010',
-    grepl('2011|2012|2013|2014|2015', year) == TRUE ~ 'bin20112015',
-    grepl('2016|2017|2018|2019|2020', year) == TRUE ~ 'bin20162020',
-    .default = 'bin2021'
+    grepl('1986|1987|1988|1989|1990', year) == TRUE ~ '1986-1990',
+    grepl('1991|1992|1993|1994|1995', year) == TRUE ~ '1991-1995',
+    grepl('1996|1997|1998|1999|2000', year) == TRUE ~ '1996-2000',
+    grepl('2001|2002|2003|2004|2005', year) == TRUE ~ '2001-2005',
+    grepl('2006|2007|2008|2009|2010', year) == TRUE ~ '2006-2010',
+    grepl('2011|2012|2013|2014|2015', year) == TRUE ~ '2011-2015',
+    grepl('2016|2017|2018|2019|2020', year) == TRUE ~ '2016-2020',
+    .default = '2021'
+                           )) |>
+  mutate(bin_alt = case_when(
+    grepl('1987|1988|1989|1990|1991', year) == TRUE ~ '1987-1991',
+    grepl('1992|1993|1994|1995|1996', year) == TRUE ~ '1992-1996',
+    grepl('1997|1998|1999|2000|2001', year) == TRUE ~ '1997-2001',
+    grepl('2002|2003|2004|2005|2006', year) == TRUE ~ '2002-2006',
+    grepl('2007|2008|2009|2010|2011', year) == TRUE ~ '2007-2011',
+    grepl('2012|2013|2014|2015|2016', year) == TRUE ~ '2012-2016',
+    grepl('2017|2018|2019|2020|2021', year) == TRUE ~ '2017-2021',
+    .default = '1986'
                            )) |>
   #mutate(bin19861990 = case_when(grepl('1986|1987|1988|1989|1990', year) == TRUE ~ 1, TRUE ~ 0)) |>
   #mutate(bin19911995 = case_when(grepl('1991|1992|1993|1994|1995', year) == TRUE ~ 1, TRUE ~ 0)) |>
@@ -604,29 +621,40 @@ regression_df <- df_no_codes |>
   pivot_wider(names_from = 'intl_class_cd', values_from = 'intl_class_yes', values_fill = 0) |>
   pivot_wider(names_from = 'year', values_from = 'year_yes', values_fill = 0) |>
   group_by(serial_no) |>
-  mutate(across(c('n', 'registered', 'published', all_of(intl_classes), 'bin', all_of(years), 'attorney'), max)) |>
+  mutate(across(c('n', 'n_basic', 'registered', 'published', all_of(intl_classes), 'bin', 'bin_alt', all_of(years), 'attorney'), max)) |>
   filter(!duplicated(serial_no)) |>
   ungroup()
 
 ```
 
 ```{r log_regression_models}
+library(sandwich)
+library(lmtest)
+library(multiwayvcov)
 
 regression_df_1 <- regression_df |>
   mutate(highcode = case_when((n > 5) ~ 1, TRUE ~ 0)) |>
   select(serial_no, highcode, published, all_of(intl_classes), bin, attorney)
   
-mod1 <- glm(published ~ . - serial_no, family = binomial, data = regression_df_1)
+mod1 <- glm(published ~ . - serial_no, family = binomial, data = regression_df_1, trace = FALSE)
+
+mod2 <- glm(published ~ highcode, family = binomial, data = regression_df_1, trace = FALSE)
+
+mod1_cl <- coeftest(mod1, vcov = vcovCL(mod1, cluster = regression_df_1$bin, type = "HC0"))
+
+mod2_cl <- coeftest(mod2, vcov = vcovCL(mod2, cluster = regression_df_1$bin, type = "HC0"))
 
 ```
 
 ```{r regression_tables}
 library(xtable)
 
-stargazer(mod1,
+stargazer(mod1, mod2,
           star.cutoffs = c(0.1, 0.05, 0.01),
-          #omit.stat = c("f", "adj.rsq", "ser"),
-          intercept.bottom = FALSE,
+          omit = c(intl_classes, 'attorney'),
+          keep = c('highcode', 'bin1986-1990', 'bin1991-1995', 'bin1996-2000', 'bin2001-2005', 'bin2006-2010', 'bin2011-2015', 'bin2016-2020'),
+          omit.stat = c("ll","aic"),
+          intercept.bottom = TRUE,
           no.space = TRUE,
           column.labels = c('Controls', 'No Controls'),
           report = 'vc*s',
@@ -637,18 +665,6 @@ stargazer(mod1,
 ```
 
 ```{r owner_analysis_general}
-
-mutate(bin = case_when(
-    grepl('1986', year) == TRUE ~ 'bin1986',
-    grepl('1987|1988|1989|1990|1991', year) == TRUE ~ 'bin19871991',
-    grepl('1992|1993|1994|1995|1996', year) == TRUE ~ 'bin19921996',
-    grepl('1997|1998|1999|2000|2001', year) == TRUE ~ 'bin19972001',
-    grepl('2002|2003|2004|2005|2006', year) == TRUE ~ 'bin20012005',
-    grepl('2007|2008|2009|2010|2011', year) == TRUE ~ 'bin20062010',
-    grepl('2012|2013|2014|2015|2016', year) == TRUE ~ 'bin20112015',
-    grepl('2017|2018|2019|2020|2021', year) == TRUE ~ 'bin20162020',
-    .default = 'bin2021'
-                           )) |>
 
 # get top 10 filers of all marks
 
@@ -730,41 +746,189 @@ top_movers_by_intl_class <- case_file_filtered |>
 
 ```
 
+```{r nonword_depletion_analysis}
+
+depleted_codes_categories_general <- right_join(case_file_filtered, design_search, by = 'serial_no') |>
+  filter(grepl('^2+', mark_draw_cd)) |>
+  mutate(writing = case_when(grepl('^27+|^28+|^2901+', design_search_cd) == TRUE ~ 1, TRUE ~ 0)) |>
+  group_by(serial_no) |>
+  mutate(n = n()) |>
+  mutate(writing = max(writing)) |>
+  ungroup() |>
+  filter(writing == 0) |>
+  mutate(category = str_sub(design_search_cd, 0, -5)) |>
+  group_by(design_search_cd) |>
+  mutate(n_code_used = n()) |>
+  ungroup() |>
+  group_by(category) |>
+  mutate(n_category_used = n()) |>
+  ungroup() |>
+  select(serial_no, design_search_cd, category, n_code_used, n_category_used, n)
+
+depleted_codes_categories_highcode <- depleted_codes_categories_general |>
+  filter(n > 5) |>
+  group_by(design_search_cd) |>
+  mutate(n_code_used = n()) |>
+  ungroup() |>
+  group_by(category) |>
+  mutate(n_category_used = n()) |>
+  ungroup()
+
+top_general <- filter(depleted_codes_categories_general, !duplicated(design_search_cd)) |>
+  slice_max(n = 10, order_by = n_code_used)
+
+top_highcode <- filter(depleted_codes_categories_highcode, !duplicated(design_search_cd)) |>
+  slice_max(n = 10, order_by = n_code_used)
+
+anti_join(top_highcode, top_general, by = 'design_search_cd')
+
+```
+
+```{r nonword_depletion_analysis_by_intl_class_1}
+
+intl_class_pivoted <- df_no_codes |>
+  left_join(intl_class, by = 'serial_no') |>
+  mutate(intl_class_yes = 1) |>
+  pivot_wider(names_from = 'intl_class_cd', values_from = 'intl_class_yes', values_fill = 0) |>
+  select('serial_no', all_of(intl_classes)) |>
+  group_by(serial_no) |>
+  mutate(across(all_of(intl_classes), max)) |>
+  filter(!duplicated(serial_no)) |>
+  ungroup()
+
+categories <- unique(depleted_codes_categories_general$category)
+
+depleted_codes_categories_intl_class_general <- depleted_codes_categories_general |>
+  left_join(intl_class_pivoted, by = 'serial_no') |>
+  group_by(design_search_cd) |>
+  mutate(across(c(intl_classes), sum)) |>
+  filter(!duplicated(design_search_cd)) |>
+  ungroup()
+
+depleted_codes_categories_intl_class_highcode <- depleted_codes_categories_highcode |>
+  left_join(intl_class_pivoted, by = 'serial_no') |>
+  group_by(design_search_cd) |>
+  mutate(across(c(intl_classes), sum)) |>
+  filter(!duplicated(design_search_cd)) |>
+  ungroup()
+
+```
+
+```{r nonword_depletion_analysis_by_intl_class_2}
+
+#depleted_codes_categories_intl_class_general <- depleted_codes_categories_intl_class_general |>
+  #rename(c9 = '009', c25 = '025', c35 = '035', c41 = '041', c42 = '042')
+
+#depleted_codes_categories_intl_class_highcode <- depleted_codes_categories_intl_class_highcode |>
+  #rename(c9 = '009', c25 = '025', c35 = '035', c41 = '041', c42 = '042')
+
+top_depleted_general <- slice_max(depleted_codes_categories_intl_class_general, n = 10, order_by = c9) |>
+  rbind(slice_max(depleted_codes_categories_intl_class_general, n = 10, order_by = c25)) |>
+  rbind(slice_max(depleted_codes_categories_intl_class_general, n = 10, order_by = c35)) |>
+  rbind(slice_max(depleted_codes_categories_intl_class_general, n = 10, order_by = c41)) |>
+  rbind(slice_max(depleted_codes_categories_intl_class_general, n = 10, order_by = c42)) |>
+  filter(!duplicated(design_search_cd))
+
+top_depleted_highcode <- slice_max(depleted_codes_categories_intl_class_highcode, n = 10, order_by = c9) |>
+  rbind(slice_max(depleted_codes_categories_intl_class_highcode, n = 10, order_by = c25)) |>
+  rbind(slice_max(depleted_codes_categories_intl_class_highcode, n = 10, order_by = c35)) |>
+  rbind(slice_max(depleted_codes_categories_intl_class_highcode, n = 10, order_by = c41)) |>
+  rbind(slice_max(depleted_codes_categories_intl_class_highcode, n = 10, order_by = c42)) |>
+  filter(!duplicated(design_search_cd))
+
+anti_join(top_depleted_highcode, top_depleted_general, by = 'design_search_cd')
+
+```
+
 ```{r codes_vs_app_no_plot}
 
-tikz(file = './graphics/figure_8.tex', width = 6.25, height = 5)
+tikz(file = './graphics/figure_7.tex', width = 6.25, height = 5)
 
 scale1 <- 10^-9
 
-figure_8.1 <- ggplot(super_percentages_per_year, aes(year, app_total)) +
-  geom_line(aes(color = 'Total Applications'), show.legend = FALSE) +
-  geom_line(aes(y = percentage10/scale1, color = 'Percentage of Applications with $>$ 10 Codes'), show.legend = FALSE) +
+figure_8.1 <- ggplot(super_totals_per_year, aes(year, app_total)) +
+  geom_line(aes(color = 'Total Applications'), show.legend = FALSE, linewidth = 1) +
+  geom_line(aes(y = percentage10/scale1, color = 'Percentage of Applications with $>$ 10 Codes'), show.legend = FALSE, linewidth = 1) +
   scale_y_continuous(sec.axis = sec_axis(~.*scale1, name = 'Nonword Applications with $>$ 10 Codes\n / All Applications'), labels = scales::label_comma()) +
   scale_x_continuous(breaks = seq(1985, 2024, by = 5), limits = c(1985, 2024), expand = c(0, 0)) +
   labs(y = 'Total Number of Applications Filed', x = 'Year') +
   scale_color_manual(values = c('#099999', '#203769')) +
-  theme(axis.title.x = element_text(vjust = -3, size = 6),
-        axis.title.y = element_text(vjust = 3, size = 6),
-        axis.text.x = element_text(vjust = 0.3, angle = 45, size = 5),
-        axis.text.y = element_text(size = 5))
+  theme(axis.title.x = element_text(vjust = -3, size = 7.5),
+        axis.title.y = element_text(vjust = 3, size = 7.5),
+        axis.text.x = element_text(vjust = 0.3, angle = 45, size = 6),
+        axis.text.y = element_text(size = 6))
 
 scale2 <- 10^-10
 
-figure_8.2 <- ggplot(super_percentages_per_year, aes(year, app_total)) +
-  geom_line(aes(color = 'Total Applications'), show.legend = FALSE) +
-  geom_line(aes(y = percentage15/scale2, color = 'Percentage of Applications with $>$ 15 Codes'), show.legend = FALSE) +
+figure_8.2 <- ggplot(super_totals_per_year, aes(year, app_total)) +
+  geom_line(aes(color = 'Total Applications'), show.legend = FALSE, linewidth = 1) +
+  geom_line(aes(y = percentage15/scale2, color = 'Percentage of Applications with $>$ 15 Codes'), show.legend = FALSE, linewidth = 1) +
   scale_y_continuous(sec.axis = sec_axis(~.*scale2, name = 'Nonword Applications with $>$ 15 Codes\n / All Applications'), labels = scales::label_number()) +
   scale_x_continuous(breaks = seq(1985, 2024, by = 5), limits = c(1985, 2024), expand = c(0, 0)) +
   labs(y = 'Total Number of Applications Filed', x = 'Year') +
   scale_color_manual(values = c('#099999', '#203769')) +
-  theme(axis.title.x = element_text(vjust = -3, size = 6),
-        axis.title.y = element_text(vjust = 3, size = 6),
-        axis.text.x = element_text(vjust = 0.3, angle = 45, size = 5),
-        axis.text.y = element_text(size = 5))
+  theme(axis.title.x = element_text(vjust = -3, size = 7.5),
+        axis.title.y = element_text(vjust = 3, size = 7.5),
+        axis.text.x = element_text(vjust = 0.3, angle = 45, size = 6),
+        axis.text.y = element_text(size = 6))
 
 figure_8.1 + figure_8.2
 
 dev.off()
+
+```
+
+```{r log_regression_models_baselining}
+
+regression_df_2 <- regression_df |>
+  mutate(highcode = case_when((n > 5) ~ 1, TRUE ~ 0)) |>
+  select(serial_no, highcode, all_of(intl_classes), bin_alt, attorney, n_basic)
+  
+mod3 <- glm(highcode ~ . - serial_no - n_basic, family = binomial, data = regression_df_2, trace = FALSE)
+
+mod4 <- glm(highcode ~ bin_alt, family = binomial, data = regression_df_2, trace = FALSE)
+
+mod5 <- glm(highcode ~ . - serial_no, family = binomial, data = regression_df_2, trace = FALSE)
+
+mod3_cl <- coeftest(mod3, vcov = vcovCL(mod3, cluster = regression_df_2$bin_alt, type = "HC0"))
+
+mod4_cl <- coeftest(mod4, vcov = vcovCL(mod4, cluster = regression_df_2$bin_alt, type = "HC0"))
+
+mod5_cl <- coeftest(mod5, vcov = vcovCL(mod5, cluster = regression_df_2$bin_alt, type = "HC0"))
+
+```
+
+```{r regression_plots}
+
+tikz(file = './graphics/figure_8.tex', width = 6.25, height = 5)
+
+figure_8.1 <- tibble(c(unique(sort(regression_df_2$bin_alt))), c(0, mod3_cl[50:56])) |>
+  rename('x' = 'c(unique(sort(regression_df_2$bin_alt)))') |>
+  rename('y' = 'c(0, mod3_cl[50:56])') |>
+  ggplot(aes(x, y)) +
+  geom_point() +
+  labs(x = '5-Year Period', y = 'Estimated Effect') +
+  theme(axis.title.x = element_text(vjust = -3, size = 7.5),
+        axis.title.y = element_text(vjust = 3, size = 7.5),
+        axis.text.x = element_text(vjust = 0.375, angle = 45, size = 6),
+        axis.text.y = element_text(size = 6),
+        plot.title = element_text(size = 9)) +
+  ggtitle('Control for representation only')
+
+figure_8.2 <- tibble(c(unique(sort(regression_df_2$bin_alt))), c(0, mod5_cl[50:56])) |>
+  rename('x' = 'c(unique(sort(regression_df_2$bin_alt)))') |>
+  rename('y' = 'c(0, mod5_cl[50:56])') |>
+  ggplot(aes(x, y)) +
+  geom_point() +
+  labs(x = '', y = '') +
+  theme(axis.title.x = element_text(vjust = -3, size = 7.5),
+        axis.title.y = element_text(vjust = 3, size = 7.5),
+        axis.text.x = element_text(vjust = 0.375, angle = 45, size = 6),
+        axis.text.y = element_text(size = 6),
+        plot.title = element_text(size = 9)) +
+  ggtitle('Control for representation and number of basic codes')
+
+figure_8.1 + figure_8.2
 
 ```
 
@@ -807,30 +971,6 @@ alt_regression_df_2 <- df_no_codes |>
 
 ```
 
-```{r lm_to_control_for_time}
-
-mod5 <- lm(n ~ . - serial_no - total_design_codes - highcode, data = alt_regression_df_2)
-
-mod5$coefficients[is.na(mod5$coefficients)] <- 0
-
-```
-
-```{r logit_to_control_for_time}
-
-mod6 <- glm(highcode ~ . - serial_no - total_design_codes - total_design_apps - n, family = binomial, data = alt_regression_df_2)
-
-mod6$coefficients[is.na(mod6$coefficients)] <- 0
-
-```
-
-```{r regression_plots}
-
-setDT(as.data.frame(mod6[['coefficients']][51:88]), keep.rownames = TRUE) |>
-  rename('effect' = 'mod6[["coefficients"]][51:88]', 'year' = 'rn') |>
-  ggplot(aes(year, effect)) +
-  geom_point()
-
-```
 
 ```{r no_codes_by_class}
 
@@ -870,7 +1010,6 @@ case_file |>
   filter(grepl('^Disney[[:space:]]Enterprises', own_name)) |>
   ungroup() |>
   left_join(intl_class, by = 'serial_no')
-  
   
   #group_by(intl_class_cd) |>
   #summarise(n = n())
