@@ -35,7 +35,7 @@ attorney <- fread('/Volumes/EXTERNALHD1/csv/correspondent_domrep_attorney.csv')
 case_file_filtered <- case_file |>
   filter((filing_dt >= '1986-01-01'), (filing_dt < '2024-01-01')) |> # removes all rows where filing_dt is NA
   mutate(year = year(filing_dt)) |>
-  select(serial_no, filing_dt, registration_no, registration_dt, publication_dt, mark_draw_cd, mark_id_char, acq_dist_in, lb_use_file_in, supp_reg_in, serv_mark_in, trade_mark_in, cert_mark_in, coll_memb_mark_in, coll_serv_mark_in, coll_trade_mark_in, cert_mark_in, draw_color_cur_in, abandon_dt, reg_cancel_dt, year) |>
+  select(serial_no, filing_dt, registration_no, registration_dt, publication_dt, mark_draw_cd, mark_id_char, acq_dist_in, lb_use_file_in, amend_supp_reg_in, supp_reg_in, serv_mark_in, trade_mark_in, cert_mark_in, coll_memb_mark_in, coll_serv_mark_in, coll_trade_mark_in, cert_mark_in, draw_color_cur_in, abandon_dt, reg_cancel_dt, year) |>
   arrange('filing_dt')
 
 case_file_filtered_totals <- case_file_filtered |>
