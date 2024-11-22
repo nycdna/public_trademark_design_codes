@@ -35,7 +35,7 @@ attorney <- fread('/Volumes/EXTERNALHD1/csv/correspondent_domrep_attorney.csv')
 case_file_filtered <- case_file |>
   filter((filing_dt >= '1986-01-01'), (filing_dt < '2024-01-01')) |> # removes all rows where filing_dt is NA
   mutate(year = year(filing_dt)) |>
-  select(serial_no, filing_dt, registration_no, registration_dt, publication_dt, mark_draw_cd, mark_id_char, acq_dist_in, lb_use_file_in, amend_supp_reg_in, supp_reg_in, serv_mark_in, trade_mark_in, cert_mark_in, coll_memb_mark_in, coll_serv_mark_in, coll_trade_mark_in, cert_mark_in, draw_color_cur_in, abandon_dt, reg_cancel_dt, year) |>
+  select(serial_no, filing_dt, registration_no, registration_dt, publication_dt, mark_draw_cd, mark_id_char, acq_dist_in, lb_use_file_in, amend_supp_reg_in, supp_reg_in, serv_mark_in, trade_mark_in, cert_mark_in, coll_memb_mark_in, coll_serv_mark_in, coll_trade_mark_in, cert_mark_in, draw_color_cur_in, abandon_dt, reg_cancel_dt, renewal_dt, year) |>
   arrange('filing_dt')
 
 case_file_filtered_totals <- case_file_filtered |>
@@ -43,7 +43,7 @@ case_file_filtered_totals <- case_file_filtered |>
   group_by(year) |>
   mutate(app_total = n()) |>
   ungroup() |>
-  filter(!(is.na(publication_dt))) |>
+  filter(!(is.na(publication_dt) | (is.na(registration_dt) & grepl('^0+', registration_no)))) |>
   group_by(year) |>
   mutate(pub_total = n()) |>
   select(year, app_total, pub_total) |>
@@ -86,12 +86,18 @@ case_file_filtered_nonword_totals <- case_file_filtered |>
   group_by(year) |>
   mutate(app_total_nontraditional = n()) |>
   ungroup() |>
+  right_join(design_search, by = 'serial_no') |>
   filter(grepl('^2+', mark_draw_cd)) |>
-  #filter(supp_reg_in == 0) |>
+  mutate(writing = case_when(grepl('^27+|^28+|^2901+', design_search_cd) == TRUE ~ 1, TRUE ~ 0)) |>
+  group_by(serial_no) |>
+  mutate(writing = max(writing)) |>
+  filter(!duplicated(serial_no)) |>
+  filter(writing == 0) |>
+  ungroup() |>
   group_by(year) |>
   mutate(app_total_nonword = n()) |>
   ungroup() |>
-  filter(!(is.na(publication_dt))) |>
+  filter(!(is.na(publication_dt) | (is.na(registration_dt) & grepl('^0+', registration_no)))) |>
   group_by(year) |>
   mutate(pub_total_nonword = n()) |>
   select(year, app_total_nontraditional, app_total_nonword, pub_total_nonword) |>
@@ -157,7 +163,8 @@ Compute aggregate stats for nonword marks:
 # merge design_search data with case_file data
 
 df <- right_join(case_file_filtered, design_search, by = 'serial_no') |>
-  filter(grepl('^2+', mark_draw_cd))
+  filter(grepl('^2+', mark_draw_cd)) |>
+  mutate(writing = case_when(grepl('^27+|^28+|^2901+', design_search_cd) == TRUE ~ 1, TRUE ~ 0))
   
 ```
 
@@ -208,12 +215,11 @@ median(df_no_codes$n)
 
 df_no_codes_per_year <- df |>
   group_by(serial_no) |>
-  #mutate(writing = case_when(grepl('^27+|^28+|^2901+', design_search_cd) == TRUE ~ 1, TRUE ~ 0)) |>
-  #mutate(writing = max(writing)) |>
+  mutate(writing = max(writing)) |>
   mutate(n = n()) |>
   filter(!duplicated(serial_no)) |>
-  #filter(max(writing) != '1') |>
   ungroup() |>
+  filter(writing == 0)
   group_by(year) |>
   summarise(mean = mean(n), median = median(n)) |>
   pivot_longer(cols = c('mean', 'median'), names_to = 'measure', values_to = 'value')
